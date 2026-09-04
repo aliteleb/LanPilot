@@ -58,6 +58,8 @@ The UI and service communicate through the ACL-protected local pipe `LanPilot.Co
 
 LanPilot stores device identities, user-defined policies, and aggregated byte totals under `%ProgramData%\LanPilot`. UI preferences are stored under `%LocalAppData%\LanPilot`. Packet payloads, websites, domains, and DNS queries are not recorded. See [Privacy](docs/PRIVACY.md).
 
+For crashes, use the included [Debug symbols, local exception logs, and optional memory dumps](docs/DIAGNOSTICS.md).
+
 ## Build from source
 
 Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) and [Inno Setup 6](https://jrsoftware.org/isinfo.php), then run:

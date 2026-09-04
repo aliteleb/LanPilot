@@ -101,6 +101,17 @@
                                 <ui:Button Margin="0,14,0,0" HorizontalAlignment="Left" Content="Contact on GitHub" Icon="{ui:SymbolIcon PersonFeedback24}" Command="{Binding OpenAuthorProfileCommand}" />
                             </StackPanel>
                         </Border>
+
+                        <Border Margin="0,14,0,0" Style="{StaticResource PilotCardStyle}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                    <ui:SymbolIcon Symbol="Bug24" Width="22" Height="22" Margin="0,0,9,0" />
+                                    <TextBlock Text="Crash diagnostics" Style="{StaticResource PilotSectionTitleTextStyle}" />
+                                </StackPanel>
+                                <TextBlock Text="LanPilot records unhandled UI, process, and background-task exceptions locally. Open this folder after a crash and inspect latest-crash.txt." TextWrapping="Wrap" Style="{StaticResource PilotBodyTextStyle}" />
+                                <ui:Button Margin="0,14,0,0" HorizontalAlignment="Left" Content="Open diagnostics folder" Icon="{ui:SymbolIcon FolderOpen24}" Command="{Binding OpenDiagnosticsFolderCommand}" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
                     <StackPanel Grid.Column="2">

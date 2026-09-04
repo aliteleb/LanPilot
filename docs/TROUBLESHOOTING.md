@@ -1,5 +1,7 @@
 # Troubleshooting
 
+For crashes, exact stack traces, Debug builds, and optional native memory dumps, see [Crash diagnostics](DIAGNOSTICS.md).
+
 ## Service offline
 
 LanPilot automatically attempts to restart and reconnect to its service. Approve the Windows Administrator prompt when using a development build. An installed build registers `LanPilotService` for delayed automatic start and configures restart recovery.

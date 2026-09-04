@@ -14,6 +14,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        CrashReporter.Initialize(this);
         _instanceMutex = new Mutex(true, MutexName, out bool createdNew);
         if (!createdNew)
         {
@@ -54,6 +55,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        CrashReporter.Record("Application exit", $"Exit code: {e.ApplicationExitCode}");
         _showListenerCancellation?.Cancel();
         _showEvent?.Dispose();
         _instanceMutex?.Dispose();

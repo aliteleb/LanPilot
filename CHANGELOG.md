@@ -2,6 +2,14 @@
 
 All notable changes to LanPilot are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- Local crash logs for unhandled WPF, process, and background-task exceptions.
+- Debug launcher for Visual Studio and opt-in Windows Error Reporting full dumps.
+- Portable PDB files in installer builds for source line resolution.
+
 ## [0.1.0] - 2026-09-04
 
 ### Added

@@ -767,6 +767,9 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private static void OpenAuthorProfile() => OpenWebAddress(AuthorUrl);
 
+    [RelayCommand]
+    private static void OpenDiagnosticsFolder() => CrashReporter.OpenDiagnosticsDirectory();
+
     public Task RefreshApplicationsSilentlyAsync() => RefreshApplicationsCoreAsync(false);
 
     private async Task RefreshApplicationsCoreAsync(bool notifyErrors)
@@ -1049,6 +1052,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            CrashReporter.RecordException($"Operation failed: {title}", ex);
             Notify(title, ex.Message, NotificationSeverity.Error);
             return new OperationResult(false, ex.Message);
         }

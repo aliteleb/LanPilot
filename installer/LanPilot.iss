@@ -45,8 +45,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "..\artifacts\package\app\*"; DestDir: "{app}\App"; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\artifacts\package\service\*"; DestDir: "{app}\Service"; Excludes: "*.pdb,WinDivert64.sys"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\artifacts\package\app\*"; DestDir: "{app}\App"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\artifacts\package\service\*"; DestDir: "{app}\Service"; Excludes: "WinDivert64.sys"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\artifacts\package\service\WinDivert64.sys"; DestDir: "{app}\Service"; Flags: ignoreversion restartreplace uninsrestartdelete
 Source: "..\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
