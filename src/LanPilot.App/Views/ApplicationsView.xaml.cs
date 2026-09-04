@@ -28,9 +28,15 @@ public partial class ApplicationsView
 
         ApplicationGrid.ItemsSource = viewModel.ApplicationsView;
         _itemsAttached = true;
+        CancellationTokenSource refreshCancellation = new();
+        CancellationToken cancellationToken = refreshCancellation.Token;
+        _refreshCancellation = refreshCancellation;
         await viewModel.RefreshApplicationsCommand.ExecuteAsync(null);
-        _refreshCancellation = new CancellationTokenSource();
-        _ = RefreshLoopAsync(viewModel, _refreshCancellation.Token);
+        if (cancellationToken.IsCancellationRequested ||
+            !ReferenceEquals(_refreshCancellation, refreshCancellation))
+            return;
+
+        _ = RefreshLoopAsync(viewModel, cancellationToken);
     }
 
     private void ApplicationsView_Unloaded(object sender, RoutedEventArgs e)

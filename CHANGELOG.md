@@ -10,6 +10,11 @@ All notable changes to LanPilot are documented here. The project follows [Semant
 - Lightweight Debug launcher without an IDE and opt-in Windows Error Reporting full dumps.
 - Portable PDB files in installer builds for source line resolution.
 
+### Fixed
+
+- A page-unload race that could crash Overview while its application refresh was awaiting a response.
+- The equivalent Applications-page lifecycle race that could leave a hidden refresh loop running.
+
 ## [0.1.0] - 2026-09-04
 
 ### Added

@@ -21,9 +21,15 @@ public partial class OverviewView
         await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
         if (!IsLoaded || DataContext is not MainViewModel viewModel) return;
 
-        _applicationRefreshCancellation = new CancellationTokenSource();
+        CancellationTokenSource refreshCancellation = new();
+        CancellationToken cancellationToken = refreshCancellation.Token;
+        _applicationRefreshCancellation = refreshCancellation;
         await viewModel.RefreshApplicationsSilentlyAsync();
-        _ = RefreshApplicationsAsync(viewModel, _applicationRefreshCancellation.Token);
+        if (cancellationToken.IsCancellationRequested ||
+            !ReferenceEquals(_applicationRefreshCancellation, refreshCancellation))
+            return;
+
+        _ = RefreshApplicationsAsync(viewModel, cancellationToken);
     }
 
     private void OverviewView_Unloaded(object sender, RoutedEventArgs e)
