@@ -19,7 +19,7 @@ if (Test-Path -LiteralPath $packageRoot) {
     Remove-Item -LiteralPath $packageRoot -Recurse -Force
 }
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
-foreach ($oldReleaseFile in @('LanPilot-Setup-0.1.0.exe', 'SHA256SUMS.txt')) {
+foreach ($oldReleaseFile in @('LanPilot-Setup-0.1.0.exe', 'LanPilot-Setup-0.1.1.exe', 'SHA256SUMS.txt')) {
     $oldReleasePath = Join-Path $artifactRoot $oldReleaseFile
     if (Test-Path -LiteralPath $oldReleasePath) {
         Remove-Item -LiteralPath $oldReleasePath -Force
@@ -53,7 +53,7 @@ if (-not $SkipInstaller) {
     }
     & $iscc (Join-Path $projectRoot 'installer\LanPilot.iss')
 
-    $installer = Get-Item -LiteralPath (Join-Path $artifactRoot 'LanPilot-Setup-0.1.0.exe')
+    $installer = Get-Item -LiteralPath (Join-Path $artifactRoot 'LanPilot-Setup-0.1.1.exe')
     $hash = Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256
     "{0}  {1}" -f $hash.Hash.ToLowerInvariant(), $installer.Name |
         Set-Content -LiteralPath (Join-Path $artifactRoot 'SHA256SUMS.txt') -Encoding ascii

@@ -31,11 +31,11 @@ LanPilot is a native Windows desktop application for seeing devices on a local I
 - [Npcap](https://npcap.com/#download) installed separately for full device discovery and control. Npcap is not included in the installer.
 - An IPv4 network with prefix `/24` through `/30`.
 
-IPv6 traffic can be detected but is not shaped in `v0.1.0`. Networks using client/AP isolation, protected switches, or ARP-spoofing defenses may prevent device control.
+IPv6 traffic can be detected but is not shaped in the `v0.1` preview series. Networks using client/AP isolation, protected switches, or ARP-spoofing defenses may prevent device control.
 
 ## Install
 
-1. Download `LanPilot-Setup-0.1.0.exe` and `SHA256SUMS.txt` from the [v0.1.0 preview release](https://github.com/aliteleb/LanPilot/releases/tag/v0.1.0).
+1. Download `LanPilot-Setup-0.1.1.exe` and `SHA256SUMS.txt` from the [latest release](https://github.com/aliteleb/LanPilot/releases/latest).
 2. Verify the SHA-256 checksum.
 3. Install [Npcap](https://npcap.com/#download) if it is not already installed.
 4. Run the installer as Administrator.

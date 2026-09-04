@@ -173,7 +173,7 @@ public partial class MainViewModel : ObservableObject
         get
         {
             Version? version = typeof(MainViewModel).Assembly.GetName().Version;
-            return version is null ? "v0.1.0" : $"v{version.Major}.{version.Minor}.{version.Build}";
+            return version is null ? "v0.1.1" : $"v{version.Major}.{version.Minor}.{version.Build}";
         }
     }
     public string CopyrightText => $"Copyright © {DateTime.Now.Year} Ali Teleb";

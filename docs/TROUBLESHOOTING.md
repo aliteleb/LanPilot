@@ -17,7 +17,7 @@ If it remains offline:
 - Install the latest [Npcap](https://npcap.com/#download).
 - Select the active Wi-Fi or Ethernet adapter and scan again.
 - Confirm that the router does not enable AP/client isolation.
-- LanPilot `v0.1.0` supports IPv4 networks up to `/24`; IPv6-only devices are not controlled.
+- The LanPilot `v0.1` preview series supports IPv4 networks up to `/24`; IPv6-only devices are not controlled.
 
 ## Device speed stays at zero
 

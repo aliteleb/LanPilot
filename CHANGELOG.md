@@ -4,6 +4,8 @@ All notable changes to LanPilot are documented here. The project follows [Semant
 
 ## Unreleased
 
+## [0.1.1] - 2026-09-04
+
 ### Added
 
 - Local crash logs for unhandled WPF, process, and background-task exceptions.
@@ -35,4 +37,6 @@ All notable changes to LanPilot are documented here. The project follows [Semant
 - Npcap must be installed separately.
 - The preview installer is unsigned.
 
+[Unreleased]: https://github.com/aliteleb/LanPilot/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/aliteleb/LanPilot/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/aliteleb/LanPilot/releases/tag/v0.1.0
