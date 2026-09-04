@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <AssemblyName>LanPilot.Service</AssemblyName>
+    <RootNamespace>LanPilot.Service</RootNamespace>
+    <ApplicationIcon>..\LanPilot.App\Assets\LanPilot.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LanPilot.Contracts\LanPilot.Contracts.csproj" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+    <PackageReference Include="Microsoft.Extensions.Logging.EventLog" />
+    <PackageReference Include="Divert.Windows" />
+    <PackageReference Include="SharpPcap" />
+    <PackageReference Include="PacketDotNet" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,137 @@
+<UserControl x:Class="LanPilot.App.Views.ApplicationsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <Grid Style="{StaticResource PilotPageRootStyle}">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+
+        <Grid Margin="0,0,0,14">
+            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal">
+                <ui:SymbolIcon Symbol="WindowApps24" Width="30" Height="30" FontSize="26" Margin="0,0,11,0" />
+                <StackPanel><TextBlock Text="App control" Style="{StaticResource PilotTitleTextStyle}" /><TextBlock Text="Control download, upload, or internet access for Windows applications." Style="{StaticResource PilotSmallTextStyle}" /></StackPanel>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <TextBox Width="280" Height="36" Margin="0,0,8,0" ToolTip="Search applications" Text="{Binding ApplicationSearchText, UpdateSourceTrigger=PropertyChanged}" />
+                <ui:Button Width="40" Height="36" ToolTip="Scan running applications" Icon="{ui:SymbolIcon ArrowSyncCircle24}" Command="{Binding RefreshApplicationsCommand}" IsEnabled="{Binding CanRefreshApplications}" />
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="1" Margin="0,0,0,14" Padding="13" Style="{StaticResource PilotSoftCardStyle}">
+            <StackPanel Orientation="Horizontal">
+                <ui:SymbolIcon Symbol="Info24" Width="18" Height="18" Margin="0,0,8,0" />
+                <TextBlock Text="LanPilot applies independent download and upload limits per executable. Leave either direction Unlimited when it should not be restricted."
+                           TextWrapping="Wrap" Style="{StaticResource PilotSmallTextStyle}" />
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2" Style="{StaticResource PilotFlatPanelStyle}">
+            <Grid>
+                <DataGrid x:Name="ApplicationGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                          MouseDoubleClick="ApplicationGrid_MouseDoubleClick"
+                          HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                          HorizontalGridLinesBrush="{DynamicResource PilotBorderBrush}"
+                          AlternationCount="2" RowHeight="62" ColumnHeaderHeight="42"
+                          CanUserResizeRows="False" SelectionMode="Single" SelectionUnit="FullRow"
+                          EnableRowVirtualization="True" VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                          Background="Transparent" BorderThickness="0">
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Setter Property="Background" Value="Transparent" /><Setter Property="BorderThickness" Value="0" /><Setter Property="VerticalContentAlignment" Value="Center" /><Setter Property="Cursor" Value="Hand" />
+                            <Style.Triggers><Trigger Property="AlternationIndex" Value="1"><Setter Property="Background" Value="{DynamicResource PilotSurfaceSoftBrush}" /></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource PilotRailSelectedBrush}" /></Trigger></Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+                    <DataGrid.Columns>
+                        <DataGridTemplateColumn Header="Application" Width="*" MinWidth="300">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Grid Width="32" Height="32" Margin="0,0,10,0">
+                                            <Image Width="28" Height="28" Source="{Binding ApplicationIcon}"
+                                                   Visibility="{Binding HasApplicationIcon, Converter={StaticResource BooleanVisibilityConverter}}" />
+                                            <ui:SymbolIcon Symbol="WindowApps24" Width="25" Height="25"
+                                                           Visibility="{Binding HasApplicationIcon, Converter={StaticResource InverseBooleanVisibilityConverter}}" />
+                                        </Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                            <TextBlock Margin="0,4,0,0" Text="{Binding ExecutableName}"
+                                                       ToolTip="{Binding ExecutablePath}"
+                                                       TextTrimming="CharacterEllipsis" Style="{StaticResource PilotSmallTextStyle}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="Status" Width="105">
+                            <DataGridTemplateColumn.CellTemplate><DataTemplate><StackPanel Orientation="Horizontal"><Ellipse Width="8" Height="8" Margin="0,0,7,0"><Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource PilotTextSecondaryBrush}" /><Style.Triggers><DataTrigger Binding="{Binding IsRunning}" Value="True"><Setter Property="Fill" Value="{DynamicResource PilotSuccessBrush}" /></DataTrigger></Style.Triggers></Style></Ellipse.Style></Ellipse><TextBlock Text="{Binding StatusText}" /></StackPanel></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="Speed" Width="135">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel VerticalAlignment="Center" ToolTip="Current download and upload speed">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ui:SymbolIcon Symbol="ArrowCircleDown24" Width="15" Height="15" Margin="0,0,6,0" Foreground="{DynamicResource PilotSuccessBrush}" />
+                                            <TextBlock Text="{Binding DownloadDisplay}">
+                                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource PilotTextPrimaryBrush}" /><Style.Triggers><DataTrigger Binding="{Binding DownloadTrend}" Value="Increasing"><Setter Property="Foreground" Value="{DynamicResource PilotSuccessBrush}" /></DataTrigger><DataTrigger Binding="{Binding DownloadTrend}" Value="Decreasing"><Setter Property="Foreground" Value="{DynamicResource PilotWarningBrush}" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <StackPanel Margin="0,4,0,0" Orientation="Horizontal">
+                                            <ui:SymbolIcon Symbol="ArrowCircleUp24" Width="15" Height="15" Margin="0,0,6,0" Foreground="{DynamicResource PilotWarningBrush}" />
+                                            <TextBlock Text="{Binding UploadDisplay}">
+                                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource PilotTextPrimaryBrush}" /><Style.Triggers><DataTrigger Binding="{Binding UploadTrend}" Value="Increasing"><Setter Property="Foreground" Value="{DynamicResource PilotSuccessBrush}" /></DataTrigger><DataTrigger Binding="{Binding UploadTrend}" Value="Decreasing"><Setter Property="Foreground" Value="{DynamicResource PilotWarningBrush}" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTextColumn Header="Limits" Binding="{Binding LimitsText}" Width="180" />
+                        <DataGridTemplateColumn Header="Blocked" Width="76">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  IsChecked="{Binding IsBlocked, Mode=OneWay}"
+                                                  IsEnabled="{Binding CanToggleBlock}"
+                                                  Command="{Binding DataContext.ToggleApplicationBlockCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                  CommandParameter="{Binding}"
+                                                  ToolTip="Block or restore application internet"
+                                                  Visibility="{Binding IsBlockPending, Converter={StaticResource InverseBooleanVisibilityConverter}}" />
+                                        <ui:ProgressRing Width="18" Height="18" IsIndeterminate="True"
+                                                         Visibility="{Binding IsBlockPending, Converter={StaticResource BooleanVisibilityConverter}}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="Actions" Width="100">
+                            <DataGridTemplateColumn.CellTemplate><DataTemplate><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><ui:Button Width="36" Height="34" Margin="0,0,6,0" ToolTip="Edit application policy" Icon="{ui:SymbolIcon EditSettings24}" Command="{Binding DataContext.EditApplicationCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}" /><ui:Button Width="36" Height="34" ToolTip="Reset application policy" Icon="{ui:SymbolIcon ArrowSyncCircle24}" Command="{Binding DataContext.ResetApplicationPolicyCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}" IsEnabled="{Binding HasPolicy}" /></StackPanel></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" Visibility="{Binding IsApplicationListLoading, Converter={StaticResource BooleanVisibilityConverter}}">
+                    <ui:ProgressRing Width="44" Height="44" HorizontalAlignment="Center" IsIndeterminate="True" />
+                    <TextBlock Margin="0,12,0,0" Text="Finding running applications…" Style="{StaticResource PilotBodyTextStyle}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.RowSpan="3" Panel.ZIndex="100" Margin="-18,-10,-18,-18" Background="#B8000000" Visibility="{Binding IsApplicationEditorVisible, Converter={StaticResource BooleanVisibilityConverter}}">
+            <Border Width="570" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource PilotDialogCardStyle}">
+                <StackPanel>
+                    <Grid Margin="0,0,0,18"><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><ui:SymbolIcon Symbol="TopSpeed24" Width="32" Height="32" Margin="0,0,12,0" /><StackPanel><TextBlock Text="Application network policy" Style="{StaticResource PilotHeroTextStyle}" /><TextBlock Text="{Binding SelectedApplication.DisplayName}" Style="{StaticResource PilotSmallTextStyle}" /></StackPanel></StackPanel><ui:Button Grid.Column="1" Width="36" Height="36" Icon="{ui:SymbolIcon Dismiss24}" Command="{Binding CloseApplicationEditorCommand}" /></Grid>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="14" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="Download limit (Mbps)" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Height="36" Margin="0,5,0,8" Text="{Binding ApplicationDownloadLimit, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                        <StackPanel Grid.Column="2"><TextBlock Text="Upload limit (Mbps)" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Height="36" Margin="0,5,0,8" Text="{Binding ApplicationUploadLimit, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
+                    </Grid>
+                    <TextBlock Margin="0,0,0,14" Text="Leave a field empty for Unlimited. Limits apply to every running process of this executable." Style="{StaticResource PilotSmallTextStyle}" />
+                    <CheckBox Content="Block all internet access for this application" IsChecked="{Binding ApplicationBlocked}" />
+                    <StackPanel Margin="0,22,0,0" Orientation="Horizontal" HorizontalAlignment="Right"><ui:Button Margin="0,0,8,0" Content="Cancel" Command="{Binding CloseApplicationEditorCommand}" /><ui:Button Appearance="Primary" Content="Save policy" Icon="{ui:SymbolIcon DocumentSave24}" Command="{Binding SaveApplicationPolicyCommand}" /></StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

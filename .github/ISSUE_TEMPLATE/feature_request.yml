@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a focused improvement for LanPilot.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: checkboxes
+    attributes:
+      label: Scope
+      options:
+        - label: This feature is intended for networks the user owns or is authorized to administer.
+          required: true
+  - type: textarea
+    attributes:
+      label: Problem
+      description: What user problem should LanPilot solve?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Proposed experience
+      description: Describe the desired workflow or behavior.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Alternatives

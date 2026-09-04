@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/aliteleb/LanPilot/security/advisories/new
+    about: Report security issues privately.
+  - name: Troubleshooting
+    url: https://github.com/aliteleb/LanPilot/blob/main/docs/TROUBLESHOOTING.md
+    about: Review common installation and network issues first.

@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible LanPilot problem.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: checkboxes
+    attributes:
+      label: Safety check
+      options:
+        - label: I am testing on a network I own or am authorized to administer.
+          required: true
+        - label: I removed private addresses, device names, and sensitive data from this report.
+          required: true
+  - type: input
+    attributes:
+      label: LanPilot version
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Windows version
+      options:
+        - Windows 11
+        - Windows 10 22H2
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Include clear reproduction steps, expected behavior, and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Sanitized diagnostics
+      description: Attach only diagnostics you have reviewed and sanitized. Never upload packet captures or credentials.
+  - type: textarea
+    attributes:
+      label: Additional context

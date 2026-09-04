@@ -1,0 +1,78 @@
+<UserControl x:Class="LanPilot.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="18,10,18,18" MaxWidth="980">
+            <StackPanel Orientation="Horizontal"><ui:SymbolIcon Symbol="Settings24" Width="28" Height="28" FontSize="24" Margin="0,0,10,0" /><TextBlock Text="Settings" Style="{StaticResource PilotTitleTextStyle}" /></StackPanel>
+            <TextBlock Margin="0,4,0,18" Text="Changes to the active adapter pause traffic control safely." Style="{StaticResource PilotSmallTextStyle}" />
+
+            <Border Margin="0,0,0,10" Style="{StaticResource PilotCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Network" Style="{StaticResource PilotSectionTitleTextStyle}" />
+                    <TextBlock Margin="0,12,0,5" Text="Adapter" Style="{StaticResource PilotSmallTextStyle}" />
+                    <ComboBox Height="36" ItemsSource="{Binding Adapters}" SelectedItem="{Binding SelectedAdapter}" DisplayMemberPath="Name" />
+                    <CheckBox Margin="0,14,0,0" Content="Auto Control on this known network" IsChecked="{Binding AutoControl}" />
+                    <CheckBox Margin="0,10,0,0" Content="Notify when a new device appears" IsChecked="{Binding NotifyNewDevices}" />
+                    <CheckBox Margin="0,10,0,0" Content="Automatically add new devices to the Guests group"
+                              IsChecked="{Binding AutoAssignNewDevicesToGuests}" />
+                    <TextBlock Margin="24,4,0,0" Text="New devices inherit the Guests limits until you set device-specific limits."
+                               Style="{StaticResource PilotSmallTextStyle}" />
+                </StackPanel>
+            </Border>
+
+            <Border Margin="0,0,0,10" Style="{StaticResource PilotCardStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Npcap driver" Style="{StaticResource PilotSectionTitleTextStyle}" />
+                        <TextBlock Margin="0,5,0,0" Text="{Binding NpcapVersion, StringFormat=Detected version: {0}}" Style="{StaticResource PilotSmallTextStyle}" />
+                        <TextBlock Margin="0,3,0,0" Text="Npcap is installed separately and is never bundled with the free LanPilot installer." Style="{StaticResource PilotSmallTextStyle}" />
+                    </StackPanel>
+                    <ui:Button Grid.Column="1" Content="Npcap website" Icon="{ui:SymbolIcon GlobeDesktop24}" Command="{Binding OpenNpcapDownloadCommand}" />
+                </Grid>
+            </Border>
+
+            <Border Margin="0,0,0,10" Style="{StaticResource PilotCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Application" Style="{StaticResource PilotSectionTitleTextStyle}" />
+                    <CheckBox Margin="0,12,0,0" Content="Run LanPilot at sign-in" IsChecked="{Binding RunAtLogin}" />
+                    <CheckBox Margin="0,10,0,0" Content="Display rates as bytes per second" IsChecked="{Binding DisplayRatesAsBytes}" />
+                    <TextBlock Margin="0,14,0,5" Text="Theme" Style="{StaticResource PilotSmallTextStyle}" />
+                    <ComboBox Width="180" HorizontalAlignment="Left" SelectedValue="{Binding Theme}" SelectedValuePath="Content">
+                        <ComboBoxItem Content="Dark" />
+                        <ComboBoxItem Content="Light" />
+                    </ComboBox>
+                    <TextBlock Margin="0,14,0,5" Text="{Binding HistoryRetentionDays, StringFormat=History retention: {0} days}" Style="{StaticResource PilotSmallTextStyle}" />
+                    <Slider Minimum="1" Maximum="365" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding HistoryRetentionDays}" />
+                </StackPanel>
+            </Border>
+
+            <Border Margin="0,0,0,10" Style="{StaticResource PilotCardStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="Backup" Style="{StaticResource PilotSectionTitleTextStyle}" /><TextBlock Text="Export or restore device names, groups, rules, and settings." Style="{StaticResource PilotSmallTextStyle}" /></StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <ui:Button Margin="0,0,8,0" Content="Import" Icon="{ui:SymbolIcon ArrowImport24}" Command="{Binding ImportBackupCommand}" />
+                        <ui:Button Content="Export" Icon="{ui:SymbolIcon ArrowExport24}" Command="{Binding ExportBackupCommand}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Margin="0,0,0,10" Style="{StaticResource PilotCardStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Diagnostics" Style="{StaticResource PilotSectionTitleTextStyle}" />
+                        <TextBlock Text="Export status and adapter information without packet payloads, DNS, or browsing content." Style="{StaticResource PilotSmallTextStyle}" />
+                    </StackPanel>
+                    <ui:Button Grid.Column="1" Content="Export diagnostics" Icon="{ui:SymbolIcon DocumentData24}" Command="{Binding ExportDiagnosticsCommand}" />
+                </Grid>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <ui:Button Appearance="Primary" Content="Save settings" Icon="{ui:SymbolIcon DocumentSave24}" Command="{Binding SaveSettingsCommand}" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

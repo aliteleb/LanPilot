@@ -1,0 +1,59 @@
+LanPilot 0.1.0 - Third-Party Notices
+==================================
+
+SharpPcap 6.3.1
+Copyright Tamir Gal, Chris Morgan, and contributors.
+License: MIT
+Project: https://github.com/dotpcap/sharppcap
+
+PacketDotNet 1.4.8
+Copyright Chris Morgan and contributors.
+License: Mozilla Public License 2.0
+Project and corresponding source: https://github.com/dotpcap/packetnet
+License text: https://www.mozilla.org/MPL/2.0/
+
+WPF-UI 4.3.0
+Copyright (C) 2021-2026 Leszek Pomianowski and WPF UI Contributors.
+License: MIT
+Project: https://github.com/lepoco/wpfui
+
+CommunityToolkit.Mvvm 8.4.2
+Copyright .NET Foundation and Contributors.
+License: MIT
+Project: https://github.com/CommunityToolkit/dotnet
+
+Divert.Windows 3.0.0
+Copyright gdlol and contributors.
+License: GNU Lesser General Public License 3.0
+Project and corresponding source: https://github.com/gdlol/Divert.Windows
+
+WinDivert 2.2.2
+Copyright (C) 2019 Basil Projects.
+License: GNU Lesser General Public License 3.0 or GNU General Public License 2.0
+Project and corresponding source: https://github.com/basil00/WinDivert
+
+Microsoft .NET and Microsoft.Extensions libraries
+Copyright Microsoft Corporation and contributors.
+License information: https://github.com/dotnet/runtime and https://github.com/dotnet/extensions
+
+MIT License notice
+------------------
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+the covered MIT-licensed software and associated documentation files, to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies,
+subject to inclusion of the applicable copyright and permission notice. The
+software is provided "AS IS", without warranty of any kind.
+
+Npcap
+-----
+Npcap is NOT included in LanPilot or its installer. Users obtain and install it
+separately from https://npcap.com/#download under Npcap's own license terms.
+LanPilot detects Npcap and does not select a legacy WinPcap installation as its
+capture provider.
+
+SelfishNet
+----------
+SelfishNet is not bundled, copied, linked, or redistributed. Its public
+repository did not declare a license when LanPilot was implemented, so LanPilot
+uses an independent clean-room implementation and original UI assets.

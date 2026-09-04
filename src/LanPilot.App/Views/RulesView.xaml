@@ -1,0 +1,186 @@
+<UserControl x:Class="LanPilot.App.Views.RulesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <Grid Style="{StaticResource PilotPageRootStyle}">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+
+        <StackPanel Margin="0,0,0,18" Orientation="Horizontal">
+            <ui:SymbolIcon Symbol="ShieldTask24" Width="28" Height="28" FontSize="24" Margin="0,0,10,0" />
+            <StackPanel>
+                <TextBlock Text="Rules &amp; schedules" Style="{StaticResource PilotTitleTextStyle}" />
+                <TextBlock Text="Add, edit, and delete group defaults, timed rules, and saved presets." Style="{StaticResource PilotSmallTextStyle}" />
+            </StackPanel>
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+
+            <Border Margin="0,0,8,0" Style="{StaticResource PilotCardStyle}">
+                <DockPanel>
+                    <Grid DockPanel.Dock="Top" Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="Groups" Style="{StaticResource PilotSectionTitleTextStyle}" /><TextBlock Margin="0,4,0,0" Text="Default limits inherited by group members." Style="{StaticResource PilotSmallTextStyle}" /></StackPanel>
+                        <ui:Button Grid.Column="1" Appearance="Primary" Content="Add" Icon="{ui:SymbolIcon PeopleCommunityAdd24}" Command="{Binding NewGroupCommand}" />
+                    </Grid>
+                    <TextBlock Text="No groups yet. Add one to organize devices." HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource PilotSmallTextStyle}" Visibility="{Binding HasGroups, Converter={StaticResource InverseBooleanVisibilityConverter}}" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding Groups}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,8" Padding="14" Style="{StaticResource PilotSoftCardStyle}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <StackPanel Margin="0,7,0,0" Orientation="Horizontal">
+                                                    <ui:SymbolIcon Symbol="ArrowCircleDown24" Width="15" Height="15" Margin="0,0,5,0" />
+                                                    <TextBlock Text="{Binding DownloadLimitBitsPerSecond, Converter={StaticResource RateLimitDisplayConverter}}" Style="{StaticResource PilotSmallTextStyle}" />
+                                                    <ui:SymbolIcon Symbol="ArrowCircleUp24" Width="15" Height="15" Margin="12,0,5,0" />
+                                                    <TextBlock Text="{Binding UploadLimitBitsPerSecond, Converter={StaticResource RateLimitDisplayConverter}}" Style="{StaticResource PilotSmallTextStyle}" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                <ui:Button Width="36" Height="34" Margin="0,0,6,0" ToolTip="Edit group" Icon="{ui:SymbolIcon EditSettings24}" Command="{Binding DataContext.EditGroupPolicyCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                                <ui:Button Width="36" Height="34" Appearance="Danger" ToolTip="Delete group" Icon="{ui:SymbolIcon Delete24}" Command="{Binding DataContext.DeleteGroupCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Column="1" Margin="8,0" Style="{StaticResource PilotCardStyle}">
+                <DockPanel>
+                    <Grid DockPanel.Dock="Top" Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="Schedules" Style="{StaticResource PilotSectionTitleTextStyle}" /><TextBlock Margin="0,4,0,0" Text="Apply limits or blocking automatically by time." Style="{StaticResource PilotSmallTextStyle}" /></StackPanel>
+                        <ui:Button Grid.Column="1" Appearance="Primary" Content="Add" Icon="{ui:SymbolIcon Clock24}" Command="{Binding NewScheduleCommand}" />
+                    </Grid>
+                    <TextBlock Text="No schedules yet. Add your first timed rule." HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource PilotSmallTextStyle}" Visibility="{Binding HasSchedules, Converter={StaticResource InverseBooleanVisibilityConverter}}" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding Schedules}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,8" Padding="14" Style="{StaticResource PilotSoftCardStyle}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <StackPanel Margin="0,7,0,0" Orientation="Horizontal">
+                                                    <ui:SymbolIcon Symbol="Clock24" Width="15" Height="15" Margin="0,0,5,0" />
+                                                    <TextBlock Text="{Binding Start, StringFormat={}{0:HH\\:mm}}" Style="{StaticResource PilotSmallTextStyle}" />
+                                                    <TextBlock Text="  →  " Style="{StaticResource PilotSmallTextStyle}" />
+                                                    <TextBlock Text="{Binding End, StringFormat={}{0:HH\\:mm}}" Style="{StaticResource PilotSmallTextStyle}" />
+                                                </StackPanel>
+                                                <TextBlock Margin="0,4,0,0" Text="{Binding Enabled, StringFormat=Enabled: {0}}" Style="{StaticResource PilotSmallTextStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                <ui:Button Width="36" Height="34" Margin="0,0,6,0" ToolTip="Edit schedule" Icon="{ui:SymbolIcon EditSettings24}" Command="{Binding DataContext.EditScheduleCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                                <ui:Button Width="36" Height="34" Appearance="Danger" ToolTip="Delete schedule" Icon="{ui:SymbolIcon Delete24}" Command="{Binding DataContext.DeleteScheduleCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Column="2" Margin="8,0,0,0" Style="{StaticResource PilotCardStyle}">
+                <DockPanel>
+                    <Grid DockPanel.Dock="Top" Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="Rule presets" Style="{StaticResource PilotSectionTitleTextStyle}" /><TextBlock Margin="0,4,0,0" Text="Save and restore the complete current setup." Style="{StaticResource PilotSmallTextStyle}" /></StackPanel>
+                        <ui:Button Grid.Column="1" Appearance="Primary" Content="Add" Icon="{ui:SymbolIcon DocumentSave24}" Command="{Binding NewPresetCommand}" />
+                    </Grid>
+                    <TextBlock Text="No presets yet. Save the current setup for quick reuse." HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource PilotSmallTextStyle}" Visibility="{Binding HasPresets, Converter={StaticResource InverseBooleanVisibilityConverter}}" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding Presets}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,8" Padding="14" Style="{StaticResource PilotSoftCardStyle}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <StackPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Margin="0,5,0,0" Text="{Binding CreatedAt, StringFormat={}{0:g}}" Style="{StaticResource PilotSmallTextStyle}" /></StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                <ui:Button Margin="0,0,6,0" Padding="9,5" Content="Apply" Icon="{ui:SymbolIcon CheckmarkCircle24}" Command="{Binding DataContext.ApplyPresetItemCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                                <ui:Button Width="36" Height="34" Margin="0,0,6,0" ToolTip="Edit preset" Icon="{ui:SymbolIcon EditSettings24}" Command="{Binding DataContext.EditPresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                                <ui:Button Width="36" Height="34" Appearance="Danger" ToolTip="Delete preset" Icon="{ui:SymbolIcon Delete24}" Command="{Binding DataContext.DeletePresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Grid>
+
+        <Grid Grid.RowSpan="2" Panel.ZIndex="100" Margin="-18,-10,-18,-18" Background="#B8000000" Visibility="{Binding IsGroupEditorVisible, Converter={StaticResource BooleanVisibilityConverter}}">
+            <Border Width="540" MaxHeight="620" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource PilotDialogCardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Grid Margin="0,0,0,18">
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal"><ui:SymbolIcon Symbol="PeopleCommunityAdd24" Width="30" Height="30" Margin="0,0,12,0" /><StackPanel><TextBlock Text="Group details" Style="{StaticResource PilotHeroTextStyle}" /><TextBlock Text="Set the defaults inherited by its devices." Style="{StaticResource PilotSmallTextStyle}" /></StackPanel></StackPanel>
+                        <ui:Button Grid.Column="1" Width="36" Height="36" Icon="{ui:SymbolIcon Dismiss24}" Command="{Binding CloseGroupEditorCommand}" />
+                    </Grid>
+                    <StackPanel Grid.Row="1">
+                        <TextBlock Text="Group name" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Margin="0,5,0,14" Height="36" Text="{Binding GroupEditName, UpdateSourceTrigger=PropertyChanged}" />
+                        <Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="14" /><ColumnDefinition /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Download limit (Mbps)" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Margin="0,5,0,14" Height="36" Text="{Binding GroupEditDownloadLimit}" /></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Upload limit (Mbps)" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Margin="0,5,0,14" Height="36" Text="{Binding GroupEditUploadLimit}" /></StackPanel></Grid>
+                        <TextBlock Text="Default priority" Style="{StaticResource PilotSmallTextStyle}" /><ComboBox Margin="0,5,0,14" Height="36" ItemsSource="{Binding Priorities}" SelectedItem="{Binding GroupEditPriority}" />
+                        <CheckBox Content="Block internet for the whole group" IsChecked="{Binding GroupEditBlocked}" />
+                        <TextBlock Margin="0,8,0,0" Text="Leave a limit empty for Unlimited. Device-specific values take priority." Style="{StaticResource PilotSmallTextStyle}" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="2" Margin="0,20,0,0" Orientation="Horizontal" HorizontalAlignment="Right"><ui:Button Margin="0,0,8,0" Content="Cancel" Icon="{ui:SymbolIcon Dismiss24}" Command="{Binding CloseGroupEditorCommand}" /><ui:Button Appearance="Primary" Content="Save group" Icon="{ui:SymbolIcon DocumentSave24}" Command="{Binding SaveGroupPolicyCommand}" /></StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid Grid.RowSpan="2" Panel.ZIndex="110" Margin="-18,-10,-18,-18" Background="#B8000000" Visibility="{Binding IsScheduleEditorVisible, Converter={StaticResource BooleanVisibilityConverter}}">
+            <Border Width="650" MaxHeight="720" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource PilotDialogCardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Grid Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><ui:SymbolIcon Symbol="Clock24" Width="30" Height="30" Margin="0,0,12,0" /><StackPanel><TextBlock Text="Schedule details" Style="{StaticResource PilotHeroTextStyle}" /><TextBlock Text="Choose who, when, and which limits apply." Style="{StaticResource PilotSmallTextStyle}" /></StackPanel></StackPanel><ui:Button Grid.Column="1" Width="36" Height="36" Icon="{ui:SymbolIcon Dismiss24}" Command="{Binding CloseScheduleEditorCommand}" /></Grid>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="Schedule name" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Margin="0,5,0,12" Height="36" Text="{Binding ScheduleEditName, UpdateSourceTrigger=PropertyChanged}" />
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="14" /><ColumnDefinition /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Target type" Style="{StaticResource PilotSmallTextStyle}" /><ComboBox Margin="0,5,0,12" Height="36" ItemsSource="{Binding ScheduleTargetTypes}" SelectedItem="{Binding ScheduleTargetType}" /></StackPanel><StackPanel Grid.Column="2" Visibility="{Binding IsScheduleGroupTarget, Converter={StaticResource InverseBooleanVisibilityConverter}}"><TextBlock Text="Device" Style="{StaticResource PilotSmallTextStyle}" /><ComboBox Margin="0,5,0,12" Height="36" ItemsSource="{Binding EditableDevices}" SelectedItem="{Binding ScheduleEditDevice}" DisplayMemberPath="DisplayName" /></StackPanel><StackPanel Grid.Column="2" Visibility="{Binding IsScheduleGroupTarget, Converter={StaticResource BooleanVisibilityConverter}}"><TextBlock Text="Group" Style="{StaticResource PilotSmallTextStyle}" /><ComboBox Margin="0,5,0,12" Height="36" ItemsSource="{Binding Groups}" SelectedItem="{Binding ScheduleEditGroup}" DisplayMemberPath="Name" /></StackPanel></Grid>
+                            <TextBlock Text="Active days" Style="{StaticResource PilotSmallTextStyle}" /><WrapPanel Margin="0,7,0,14"><CheckBox Margin="0,0,14,6" Content="Mon" IsChecked="{Binding ScheduleMonday}" /><CheckBox Margin="0,0,14,6" Content="Tue" IsChecked="{Binding ScheduleTuesday}" /><CheckBox Margin="0,0,14,6" Content="Wed" IsChecked="{Binding ScheduleWednesday}" /><CheckBox Margin="0,0,14,6" Content="Thu" IsChecked="{Binding ScheduleThursday}" /><CheckBox Margin="0,0,14,6" Content="Fri" IsChecked="{Binding ScheduleFriday}" /><CheckBox Margin="0,0,14,6" Content="Sat" IsChecked="{Binding ScheduleSaturday}" /><CheckBox Content="Sun" IsChecked="{Binding ScheduleSunday}" /></WrapPanel>
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="14" /><ColumnDefinition /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Start time (HH:mm)" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Margin="0,5,0,12" Height="36" Text="{Binding ScheduleEditStart}" /></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="End time (HH:mm)" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Margin="0,5,0,12" Height="36" Text="{Binding ScheduleEditEnd}" /></StackPanel></Grid>
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="14" /><ColumnDefinition /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Download limit (Mbps)" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Margin="0,5,0,12" Height="36" Text="{Binding ScheduleEditDownloadLimit}" /></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Upload limit (Mbps)" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Margin="0,5,0,12" Height="36" Text="{Binding ScheduleEditUploadLimit}" /></StackPanel></Grid>
+                            <CheckBox Margin="0,2,0,10" Content="Block internet while this schedule is active" IsChecked="{Binding ScheduleEditBlocked}" /><CheckBox Content="Schedule enabled" IsChecked="{Binding ScheduleEditEnabled}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                    <StackPanel Grid.Row="2" Margin="0,18,0,0" Orientation="Horizontal" HorizontalAlignment="Right"><ui:Button Margin="0,0,8,0" Content="Cancel" Icon="{ui:SymbolIcon Dismiss24}" Command="{Binding CloseScheduleEditorCommand}" /><ui:Button Appearance="Primary" Content="Save schedule" Icon="{ui:SymbolIcon DocumentSave24}" Command="{Binding SaveScheduleEditorCommand}" /></StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid Grid.RowSpan="2" Panel.ZIndex="120" Margin="-18,-10,-18,-18" Background="#B8000000" Visibility="{Binding IsPresetEditorVisible, Converter={StaticResource BooleanVisibilityConverter}}">
+            <Border Width="500" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource PilotDialogCardStyle}">
+                <StackPanel>
+                    <Grid Margin="0,0,0,18"><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><ui:SymbolIcon Symbol="DocumentSave24" Width="30" Height="30" Margin="0,0,12,0" /><StackPanel><TextBlock Text="Preset details" Style="{StaticResource PilotHeroTextStyle}" /><TextBlock Text="A new preset captures all current policies and schedules." Style="{StaticResource PilotSmallTextStyle}" /></StackPanel></StackPanel><ui:Button Grid.Column="1" Width="36" Height="36" Icon="{ui:SymbolIcon Dismiss24}" Command="{Binding ClosePresetEditorCommand}" /></Grid>
+                    <TextBlock Text="Preset name" Style="{StaticResource PilotSmallTextStyle}" /><TextBox Margin="0,5,0,18" Height="36" Text="{Binding PresetName, UpdateSourceTrigger=PropertyChanged}" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><ui:Button Margin="0,0,8,0" Content="Cancel" Command="{Binding ClosePresetEditorCommand}" /><ui:Button Appearance="Primary" Content="Save preset" Icon="{ui:SymbolIcon DocumentSave24}" Command="{Binding SavePresetCommand}" /></StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Grid Grid.RowSpan="2" Panel.ZIndex="130" Margin="-18,-10,-18,-18" Background="#B8000000" Visibility="{Binding IsRuleDeleteConfirmationVisible, Converter={StaticResource BooleanVisibilityConverter}}">
+            <Border Width="500" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource PilotDialogCardStyle}">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16"><ui:SymbolIcon Symbol="ShieldError24" Width="34" Height="34" Margin="0,0,12,0" /><StackPanel><TextBlock Text="Delete this item?" Style="{StaticResource PilotHeroTextStyle}" /><TextBlock Text="This action cannot be undone." Style="{StaticResource PilotSmallTextStyle}" /></StackPanel></StackPanel>
+                    <Border Padding="14" Margin="0,0,0,18" Style="{StaticResource PilotSoftCardStyle}"><TextBlock Text="{Binding PendingDeleteName}" FontWeight="SemiBold" /></Border>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><ui:Button Margin="0,0,8,0" Content="Cancel" Command="{Binding CancelRuleDeleteCommand}" /><ui:Button Appearance="Danger" Content="Delete" Icon="{ui:SymbolIcon Dismiss24}" Command="{Binding ConfirmRuleDeleteCommand}" /></StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>
