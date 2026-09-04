@@ -35,7 +35,7 @@ IPv6 traffic can be detected but is not shaped in `v0.1.0`. Networks using clien
 
 ## Install
 
-1. Download `LanPilot-Setup-0.1.0.exe` and `SHA256SUMS.txt` from the [latest release](https://github.com/aliteleb/LanPilot/releases/latest).
+1. Download `LanPilot-Setup-0.1.0.exe` and `SHA256SUMS.txt` from the [v0.1.0 preview release](https://github.com/aliteleb/LanPilot/releases/tag/v0.1.0).
 2. Verify the SHA-256 checksum.
 3. Install [Npcap](https://npcap.com/#download) if it is not already installed.
 4. Run the installer as Administrator.
