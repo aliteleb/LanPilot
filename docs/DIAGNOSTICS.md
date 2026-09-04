@@ -2,7 +2,7 @@
 
 LanPilot keeps application crash logs under `%LocalAppData%\LanPilot\Diagnostics`. The newest fatal exception is also copied to `latest-crash.txt`. These logs include exception types, stack traces, runtime details, and source line numbers when matching PDB files are present.
 
-## Reproduce in Visual Studio
+## Reproduce without an IDE
 
 Run:
 
@@ -10,7 +10,7 @@ Run:
 .\tools\Run-Debug.ps1
 ```
 
-Visual Studio opens the Debug executable. Press `F5`, open **Debug → Windows → Exception Settings**, and enable **Common Language Runtime Exceptions → Break on thrown**. Visual Studio will then stop at the original throw site instead of only showing the final crash.
+The script closes an existing LanPilot desktop process, builds with Debug symbols, and starts the Debug executable directly. No IDE is opened. Reproduce the crash normally, then inspect `%LocalAppData%\LanPilot\Diagnostics\latest-crash.txt` and the newest session log.
 
 ## Capture native crashes
 
