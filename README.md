@@ -35,7 +35,7 @@ IPv6 traffic can be detected but is not shaped in the `v0.1` preview series. Net
 
 ## Install
 
-1. Download `LanPilot-Setup-0.1.1.exe` and `SHA256SUMS.txt` from the [v0.1.1 preview release](https://github.com/aliteleb/LanPilot/releases/tag/v0.1.1).
+1. Download `LanPilot-Setup-0.1.2.exe` and `SHA256SUMS.txt` from the [v0.1.2 preview release](https://github.com/aliteleb/LanPilot/releases/tag/v0.1.2). Read its validation limitations before testing.
 2. Verify the SHA-256 checksum.
 3. Install [Npcap](https://npcap.com/#download) if it is not already installed.
 4. Run the installer as Administrator.
@@ -68,7 +68,7 @@ Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) and
 .\build.ps1
 ```
 
-This restores packages, builds with warnings as errors, runs tests, publishes self-contained untrimmed `win-x64` output, creates the installer, and generates its SHA-256 checksum under `artifacts\`.
+This restores packages, builds with warnings as errors, runs tests, publishes self-contained untrimmed `win-x64` output, creates the installer, and generates its SHA-256 checksum under a fresh `artifacts\releases\<version>-<guid>\` directory. Previous builds and running packages are never deleted.
 
 To build without the installer:
 

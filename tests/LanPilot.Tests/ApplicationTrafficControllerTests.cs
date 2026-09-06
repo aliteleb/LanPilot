@@ -80,7 +80,9 @@ public sealed class ApplicationTrafficControllerTests
     {
         byte[] packet = new byte[40];
         packet[0] = 0x45;
+        packet[3] = 40;
         packet[9] = 6;
+        packet[32] = 0x50;
         IPAddress.Parse("8.8.8.8").GetAddressBytes().CopyTo(packet, 12);
         IPAddress.Parse("192.168.1.3").GetAddressBytes().CopyTo(packet, 16);
         System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(packet.AsSpan(20, 2), 443);
@@ -99,7 +101,9 @@ public sealed class ApplicationTrafficControllerTests
     {
         byte[] packet = new byte[40];
         packet[0] = 0x45;
+        packet[3] = 40;
         packet[9] = 17;
+        packet[25] = 20;
         IPAddress.Parse("192.168.1.3").GetAddressBytes().CopyTo(packet, 12);
         IPAddress.Parse("1.1.1.1").GetAddressBytes().CopyTo(packet, 16);
         System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(packet.AsSpan(20, 2), 53000);

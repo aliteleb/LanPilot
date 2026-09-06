@@ -4,7 +4,6 @@ namespace LanPilot.Service;
 
 public sealed class LanPilotWorker(
     LanPilotCoordinator coordinator,
-    ApplicationTrafficController applicationTrafficController,
     ILogger<LanPilotWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -29,8 +28,7 @@ public sealed class LanPilotWorker(
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        await applicationTrafficController.StopAsync(cancellationToken);
-        await coordinator.EmergencyPauseAsync(cancellationToken);
-        await base.StopAsync(cancellationToken);
+        try { await coordinator.SuspendAllAsync("Shutdown", CancellationToken.None); }
+        finally { await base.StopAsync(cancellationToken); }
     }
 }

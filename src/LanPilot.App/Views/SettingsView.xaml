@@ -64,7 +64,7 @@
                     <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                     <StackPanel>
                         <TextBlock Text="Diagnostics" Style="{StaticResource PilotSectionTitleTextStyle}" />
-                        <TextBlock Text="Export status and adapter information without packet payloads, DNS, or browsing content." Style="{StaticResource PilotSmallTextStyle}" />
+                        <TextBlock Text="Export recent errors, memory, traffic health, and policy diagnostics. Export during a problem, before exiting. No browsing content is recorded." Style="{StaticResource PilotSmallTextStyle}" TextWrapping="Wrap" />
                     </StackPanel>
                     <ui:Button Grid.Column="1" Content="Export diagnostics" Icon="{ui:SymbolIcon DocumentData24}" Command="{Binding ExportDiagnosticsCommand}" />
                 </Grid>

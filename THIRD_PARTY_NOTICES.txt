@@ -1,4 +1,4 @@
-LanPilot 0.1.1 - Third-Party Notices
+LanPilot 0.1.2 - Third-Party Notices
 ==================================
 
 SharpPcap 6.3.1
@@ -22,15 +22,23 @@ Copyright .NET Foundation and Contributors.
 License: MIT
 Project: https://github.com/CommunityToolkit/dotnet
 
-Divert.Windows 3.0.0
+Divert.Windows 3.0.0-lanpilot.2
 Copyright gdlol and contributors.
 License: GNU Lesser General Public License 3.0
 Project and corresponding source: https://github.com/gdlol/Divert.Windows
+LanPilot modifications by Ali Teleb, 2026-09-06: receive-operation pooling and
+completion-resource lifetime fixes and safe receive shutdown. This library remains LGPL-3.0-only, not MIT.
+Corresponding patched source, build instructions, and GPL/LGPL license texts
+are included in the service package under third_party/Divert.Windows.
+It is dynamically linked and can be replaced by a compatible modified build.
 
 WinDivert 2.2.2
 Copyright (C) 2019 Basil Projects.
 License: GNU Lesser General Public License 3.0 or GNU General Public License 2.0
 Project and corresponding source: https://github.com/basil00/WinDivert
+Exact source: https://github.com/basil00/WinDivert/tree/v2.2.2
+The release includes WinDivert-2.2.2-source.zip and PacketDotNet-1.4.8-source.zip
+with upstream source/license texts, plus the patched Divert.Windows source.
 
 Microsoft .NET and Microsoft.Extensions libraries
 Copyright Microsoft Corporation and contributors.

@@ -101,6 +101,8 @@ public sealed record PipeEnvelope(
 
 public static class PipeCommands
 {
+    public const string ControlExit = "control.exit";
+    public const string ControlOpen = "control.open";
     public const string SnapshotGet = "snapshot.get";
     public const string ScanStart = "scan.start";
     public const string ControlSet = "control.set";

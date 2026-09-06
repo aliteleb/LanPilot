@@ -2,14 +2,20 @@ using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Threading.Channels;
 using LanPilot.Contracts;
+using LanPilot.Service.Diagnostics;
 
 namespace LanPilot.Service.Ipc;
 
 public sealed class PipeServer(
     LanPilotCoordinator coordinator,
+    DiagnosticRecorder diagnostics,
     ILogger<PipeServer> logger) : BackgroundService
 {
+    private static readonly HashSet<string> KnownCommands = typeof(PipeCommands).GetFields()
+        .Where(field => field.IsLiteral && field.FieldType == typeof(string))
+        .Select(field => (string)field.GetRawConstantValue()!).ToHashSet(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Guid, ClientConnection> _clients = new();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -21,7 +27,8 @@ public sealed class PipeServer(
             while (!stoppingToken.IsCancellationRequested)
             {
                 NamedPipeServerStream pipe = CreatePipe();
-                await pipe.WaitForConnectionAsync(stoppingToken);
+                try { await pipe.WaitForConnectionAsync(stoppingToken); }
+                catch { pipe.Dispose(); throw; }
                 _ = HandleClientAsync(pipe, stoppingToken);
             }
         }
@@ -71,12 +78,14 @@ public sealed class PipeServer(
         Guid id = Guid.NewGuid();
         ClientConnection client = new(pipe);
         _clients[id] = client;
+        diagnostics.Record("LanPilot.Pipe", "Information", "Client connected");
         try
         {
             while (pipe.IsConnected && !serverToken.IsCancellationRequested)
             {
                 PipeEnvelope? request = await PipeProtocol.ReadAsync(pipe, serverToken);
                 if (request is null) break;
+                if (request.Name == PipeCommands.Subscribe) client.Subscribed = true;
                 PipeEnvelope response = await DispatchAsync(request, serverToken);
                 await client.WriteAsync(response, serverToken);
             }
@@ -92,6 +101,7 @@ public sealed class PipeServer(
         finally
         {
             _clients.TryRemove(id, out _);
+            diagnostics.Record("LanPilot.Pipe", "Information", "Client disconnected");
             await client.DisposeAsync();
         }
     }
@@ -101,10 +111,16 @@ public sealed class PipeServer(
         if (request.Kind != PipeMessageKind.Request || request.Version != PipeProtocol.Version)
             return PipeProtocol.Error(request, "Unsupported pipe protocol.");
 
+        string command = KnownCommands.Contains(request.Name) ? request.Name : "unknown";
+        bool trace = command is not (PipeCommands.SnapshotGet or PipeCommands.ApplicationsGet or PipeCommands.Subscribe);
+        long started = Environment.TickCount64;
+        if (trace) diagnostics.Record("LanPilot.Command", "Information", $"Started: {command}");
         try
         {
             object result = request.Name switch
             {
+                PipeCommands.ControlExit => await coordinator.SuspendAllAsync("UserExit", cancellationToken),
+                PipeCommands.ControlOpen => await coordinator.OpenUiAsync(cancellationToken),
                 PipeCommands.SnapshotGet => coordinator.GetSnapshot(),
                 PipeCommands.ScanStart => await coordinator.ScanAsync(request.ReadPayload<ScanRequest>().AdapterId, cancellationToken),
                 PipeCommands.ControlSet => await coordinator.SetControlAsync(request.ReadPayload<ControlRequest>().Enabled, cancellationToken),
@@ -130,10 +146,15 @@ public sealed class PipeServer(
                 PipeCommands.Subscribe => new OperationResult(true, "Subscribed."),
                 _ => new OperationResult(false, $"Unknown command: {request.Name}")
             };
+            if (result is OperationResult { Success: false })
+                diagnostics.Record("LanPilot.Command", "Warning", $"Rejected: {command}");
+            else if (trace)
+                diagnostics.Record("LanPilot.Command", "Information", $"Completed: {command}; elapsedMs={Environment.TickCount64 - started}");
             return PipeProtocol.Response(request, result);
         }
         catch (Exception ex)
         {
+            diagnostics.Record("LanPilot.Command", "Warning", $"Failed: {command}", ex);
             logger.LogWarning(ex, "Pipe command {Command} failed.", request.Name);
             return PipeProtocol.Error(request, ex.Message);
         }
@@ -155,20 +176,47 @@ public sealed class PipeServer(
     {
         foreach (ClientConnection client in _clients.Values)
         {
-            _ = client.TryWriteAsync(envelope);
+            client.QueueEvent(envelope);
         }
     }
 
-    private sealed class ClientConnection(NamedPipeServerStream pipe) : IAsyncDisposable
+    private sealed class ClientConnection : IAsyncDisposable
     {
+        private readonly NamedPipeServerStream pipe;
         private readonly SemaphoreSlim _writeGate = new(1, 1);
+        private readonly CancellationTokenSource _closed = new();
+        private readonly Channel<PipeEnvelope> _events = Channel.CreateBounded<PipeEnvelope>(new BoundedChannelOptions(1)
+        {
+            SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.DropOldest
+        });
+        private readonly Task _eventWriter;
+        public bool Subscribed { get; set; }
+
+        public ClientConnection(NamedPipeServerStream stream)
+        {
+            pipe = stream;
+            _eventWriter = PumpEventsAsync();
+        }
+
+        public void QueueEvent(PipeEnvelope envelope)
+        {
+            if (Subscribed) _events.Writer.TryWrite(envelope);
+        }
 
         public async Task WriteAsync(PipeEnvelope envelope, CancellationToken cancellationToken)
         {
-            await _writeGate.WaitAsync(cancellationToken);
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _closed.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            await _writeGate.WaitAsync(timeout.Token);
             try
             {
-                if (pipe.IsConnected) await PipeProtocol.WriteAsync(pipe, envelope, cancellationToken);
+                await PipeProtocol.WriteAsync(pipe, envelope, timeout.Token);
+            }
+            catch
+            {
+                // A cancelled write can have emitted part of a frame. Never reuse it.
+                pipe.Dispose();
+                throw;
             }
             finally
             {
@@ -176,23 +224,27 @@ public sealed class PipeServer(
             }
         }
 
-        public async Task TryWriteAsync(PipeEnvelope envelope)
+        private async Task PumpEventsAsync()
         {
             try
             {
-                using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(2));
-                await WriteAsync(envelope, timeout.Token);
+                await foreach (PipeEnvelope envelope in _events.Reader.ReadAllAsync(_closed.Token))
+                    await WriteAsync(envelope, _closed.Token);
             }
             catch
             {
-                // A failed background write is handled by the main client loop.
+                pipe.Dispose();
             }
         }
 
         public async ValueTask DisposeAsync()
         {
+            _events.Writer.TryComplete();
+            await _closed.CancelAsync();
             try { await pipe.DisposeAsync(); } catch { }
+            await _eventWriter;
             _writeGate.Dispose();
+            _closed.Dispose();
         }
     }
 }

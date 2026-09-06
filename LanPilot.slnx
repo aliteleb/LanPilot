@@ -7,4 +7,10 @@
   <Folder Name="/tests/">
     <Project Path="tests/LanPilot.Tests/LanPilot.Tests.csproj" />
   </Folder>
+  <Folder Name="/third_party/">
+    <Project Path="third_party/Divert.Windows/Divert.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/LanPilot.MemoryProbe/LanPilot.MemoryProbe.csproj" />
+  </Folder>
 </Solution>

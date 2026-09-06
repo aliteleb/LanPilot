@@ -35,7 +35,8 @@ public sealed class LanPilotClient : IAsyncDisposable
             staleReader?.Dispose();
 
             NamedPipeClientStream pipe = new(".", PipeProtocol.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-            await pipe.ConnectAsync(3000, cancellationToken);
+            try { await pipe.ConnectAsync(3000, cancellationToken); }
+            catch { pipe.Dispose(); throw; }
             _pipe = pipe;
             // The reader belongs to the connection lifetime, not to the short
             // timeout used by the call that established this connection.
@@ -60,7 +61,27 @@ public sealed class LanPilotClient : IAsyncDisposable
         SendAsync<OperationResult>(PipeCommands.ControlSet, new ControlRequest(enabled), cancellationToken);
 
     public Task<OperationResult> EmergencyPauseAsync(CancellationToken cancellationToken) =>
-        SendAsync<OperationResult>(PipeCommands.EmergencyPause, new { }, cancellationToken);
+        SendEmergencyAsync(PipeCommands.EmergencyPause, cancellationToken);
+
+    public Task<OperationResult> ExitControlAsync(CancellationToken token) => SendEmergencyAsync(PipeCommands.ControlExit, token);
+    public Task<OperationResult> OpenUiAsync(CancellationToken token) => SendAsync<OperationResult>(PipeCommands.ControlOpen, new { }, token);
+
+    private static async Task<OperationResult> SendEmergencyAsync(string command, CancellationToken token)
+    {
+        await using NamedPipeClientStream pipe = new(".", PipeProtocol.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(25));
+        await pipe.ConnectAsync(timeout.Token);
+        PipeEnvelope request = PipeProtocol.Request(command, new { });
+        await PipeProtocol.WriteAsync(pipe, request, timeout.Token);
+        while (await PipeProtocol.ReadAsync(pipe, timeout.Token) is PipeEnvelope response)
+        {
+            if (response.RequestId != request.RequestId) continue;
+            if (!string.IsNullOrWhiteSpace(response.Error)) throw new IOException(response.Error);
+            return response.ReadPayload<OperationResult>();
+        }
+        throw new IOException("Service disconnected before confirming restoration.");
+    }
 
     public Task<OperationResult> UpdatePolicyAsync(DevicePolicy policy, CancellationToken cancellationToken) =>
         SendAsync<OperationResult>(PipeCommands.DevicePolicySet, policy, cancellationToken);
@@ -124,26 +145,30 @@ public sealed class LanPilotClient : IAsyncDisposable
         TaskCompletionSource<PipeEnvelope> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[request.RequestId!] = completion;
 
-        await _writeGate.WaitAsync(cancellationToken);
         try
         {
-            await PipeProtocol.WriteAsync(pipe, request, cancellationToken);
-        }
-        catch
-        {
-            _pending.TryRemove(request.RequestId!, out _);
-            InvalidateConnection(pipe);
-            throw;
-        }
-        finally
-        {
-            _writeGate.Release();
-        }
+            await _writeGate.WaitAsync(cancellationToken);
+            try
+            {
+                await PipeProtocol.WriteAsync(pipe, request, cancellationToken);
+            }
+            catch
+            {
+                _pending.TryRemove(request.RequestId!, out _);
+                InvalidateConnection(pipe);
+                throw;
+            }
+            finally
+            {
+                _writeGate.Release();
+            }
 
-        using CancellationTokenRegistration registration = cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
-        PipeEnvelope response = await completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
-        if (!string.IsNullOrWhiteSpace(response.Error)) throw new IOException(response.Error);
-        return response.ReadPayload<T>();
+            using CancellationTokenRegistration registration = cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
+            PipeEnvelope response = await completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            if (!string.IsNullOrWhiteSpace(response.Error)) throw new IOException(response.Error);
+            return response.ReadPayload<T>();
+        }
+        finally { _pending.TryRemove(request.RequestId!, out _); }
     }
 
     private async Task ReadLoopAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
@@ -168,7 +193,7 @@ public sealed class LanPilotClient : IAsyncDisposable
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or OperationCanceledException)
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException)
         {
         }
         finally
@@ -184,6 +209,7 @@ public sealed class LanPilotClient : IAsyncDisposable
 
     private void InvalidateConnection(NamedPipeClientStream pipe)
     {
+        pipe.Dispose();
         if (!ReferenceEquals(Interlocked.CompareExchange(ref _pipe, null, pipe), pipe)) return;
         _readerCancellation?.Cancel();
         ConnectionChanged?.Invoke(this, false);

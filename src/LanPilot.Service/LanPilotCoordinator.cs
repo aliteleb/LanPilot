@@ -5,6 +5,7 @@ using System.Text.Json;
 using LanPilot.Contracts;
 using LanPilot.Service.Engine;
 using LanPilot.Service.Persistence;
+using LanPilot.Service.Diagnostics;
 
 namespace LanPilot.Service;
 
@@ -14,9 +15,23 @@ public sealed class LanPilotCoordinator(
     NetworkScanner scanner,
     TrafficEngine trafficEngine,
     PolicyResolver policyResolver,
-    ApplicationTrafficController applicationTrafficController,
-    ILogger<LanPilotCoordinator> logger)
+    IApplicationPolicyController applicationTrafficController,
+    DiagnosticRecorder diagnostics,
+    ApplicationDownloadLimiter applicationLimiter,
+    ApplicationTrafficMonitor applicationMonitor,
+    ILogger<LanPilotCoordinator> logger,
+    ControlSafetyJournal? safetyJournal = null)
 {
+    private readonly ControlSafetyJournal _safetyJournal = safetyJournal ?? new();
+    private readonly SemaphoreSlim _controlGate = new(1, 1);
+    private readonly object _cancellationGate = new();
+    private CancellationTokenSource _controlCancellation = new();
+    private CancellationTokenSource? _scanCancellation;
+    private ControlSafetyStatus _safety = new("None", false, true, false, DateTimeOffset.UtcNow);
+    public bool IsInitialized { get; private set; }
+    public bool IsTransitioning { get; private set; }
+    public bool IsSuspended => _safety.Reason != "None";
+    public bool ExpectsDeviceControl => _status.Mode == EngineMode.Controlling && !IsSuspended;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ConcurrentDictionary<string, DeviceSnapshot> _devices = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, GroupPolicy> _groups = new(StringComparer.OrdinalIgnoreCase);
@@ -34,11 +49,16 @@ public sealed class LanPilotCoordinator(
     private DateTimeOffset _lastCounterRead = DateTimeOffset.Now;
     private DateTimeOffset _lastOnlineRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastKnownDeviceRefresh = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastNpcapRefresh = DateTimeOffset.MinValue;
     private Task? _deviceRefreshTask;
+    private Task? _networkRefreshTask;
+    private DateTimeOffset _lastNetworkRefresh;
     private int _controlGeneration;
+    private long _lastTickStarted, _lastTickCompleted;
     private readonly ConcurrentDictionary<string, (long Down, long Up)> _minuteCounters = new();
     private static readonly TimeSpan OnlineRefreshInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan KnownDeviceRefreshInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan NpcapRefreshInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan OfflineGracePeriod = TimeSpan.FromSeconds(45);
 
     public event EventHandler? SnapshotChanged;
@@ -64,33 +84,37 @@ public sealed class LanPilotCoordinator(
         foreach (LocalApplicationPolicy policy in await store.LoadApplicationPoliciesAsync(cancellationToken))
         {
             _applicationPolicies[policy.Id] = policy;
-            try
-            {
-                await applicationTrafficController.ApplyAsync(policy, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Could not restore the application policy for {Application}.", policy.DisplayName);
-            }
+        }
+        try { _safety = await _safetyJournal.LoadAsync(cancellationToken) ?? _safety; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Control safety state could not be loaded; requiring manual resume.");
+            _safety = new("Fault", true, false, false, DateTimeOffset.UtcNow);
+        }
+        ControlSession? abandonedSession = null;
+        bool startupRestored = true;
+        try { abandonedSession = await sessionJournal.LoadAsync(cancellationToken); }
+        catch (Exception ex)
+        {
+            startupRestored = false;
+            _safety = new("Fault", true, false, false, DateTimeOffset.UtcNow);
+            logger.LogError(ex, "The recovery journal is unreadable. Manual recovery is required.");
+        }
+        if (abandonedSession is not null || _safety.ApplicationsActive)
+            _safety = new("Fault", true, false, false, DateTimeOffset.UtcNow);
+        if (IsSuspended)
+        {
+            try { await applicationTrafficController.SuspendAllAsync(cancellationToken); }
+            catch (Exception ex) { startupRestored = false; logger.LogWarning(ex, "Startup policy cleanup was incomplete."); }
         }
 
         (bool available, string? version) = NpcapDetector.Detect();
+        _lastNpcapRefresh = DateTimeOffset.Now;
         _adapters = await scanner.GetAdaptersAsync(_settings.SelectedAdapterId, cancellationToken);
         NetworkAdapterInfo? selected = SelectAdapter(_settings.SelectedAdapterId);
         bool ipv6 = DetectIpv6();
+        if (abandonedSession is not null && !available) startupRestored = false;
 
-        if (selected is null)
-        {
-            SetStatus(EngineMode.Faulted, "No supported IPv4 Ethernet or Wi-Fi adapter was found.", available, version, ipv6);
-            return;
-        }
-
-        _settings = _settings with { SelectedAdapterId = selected.Id };
-        await store.SaveSettingsAsync(_settings, cancellationToken);
-        _network = BuildKnownProfile(selected);
-        await store.SaveNetworkAsync(_network, cancellationToken);
-
-        ControlSession? abandonedSession = await sessionJournal.LoadAsync(cancellationToken);
         if (available && abandonedSession is not null)
         {
             SetStatus(EngineMode.Recovering, "Restoring network state from an interrupted control session…", available, version, ipv6);
@@ -101,6 +125,7 @@ public sealed class LanPilotCoordinator(
             }
             catch (Exception ex)
             {
+                startupRestored = false;
                 logger.LogWarning(ex, "Could not restore an abandoned traffic-control session.");
                 NotificationRaised?.Invoke(this, new NotificationEvent(
                     "Network recovery warning",
@@ -108,6 +133,18 @@ public sealed class LanPilotCoordinator(
                     NotificationSeverity.Warning));
             }
         }
+        _safety = _safety with { RestorationComplete = startupRestored, UpdatedAt = DateTimeOffset.UtcNow };
+        await _safetyJournal.SaveAsync(_safety, cancellationToken);
+        IsInitialized = true;
+        if (selected is null)
+        {
+            SetStatus(EngineMode.DriverUnavailable, "Device control unavailable. Application control can be resumed independently.", available, version, ipv6);
+            return;
+        }
+        _settings = _settings with { SelectedAdapterId = selected.Id };
+        await store.SaveSettingsAsync(_settings, cancellationToken);
+        _network = BuildKnownProfile(selected);
+        await store.SaveNetworkAsync(_network, cancellationToken);
 
         SetStatus(
             available ? EngineMode.Idle : EngineMode.DriverUnavailable,
@@ -117,7 +154,7 @@ public sealed class LanPilotCoordinator(
             ipv6);
 
         await ScanAsync(selected.Id, cancellationToken);
-        if (_settings.AutoControl && _network.AutoControl && available)
+        if (!IsSuspended && _settings.AutoControl && _network.AutoControl && available)
         {
             await SetControlAsync(true, cancellationToken);
         }
@@ -140,14 +177,24 @@ public sealed class LanPilotCoordinator(
             _groups.Values.OrderBy(item => item.Name).ToArray(),
             _schedules.Values.OrderBy(item => item.Name).ToArray(),
             _presets.Values.OrderByDescending(item => item.CreatedAt).ToArray(),
-            _settings);
+            _settings, _safety with { DevicesActive = trafficEngine.IsRunning }, applicationMonitor.IsAvailable);
     }
 
     public async Task<OperationResult> ScanAsync(string? adapterId, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
+        bool controlAcquired = false;
+        CancellationTokenSource? scan = null;
         try
         {
+            await _controlGate.WaitAsync(cancellationToken);
+            controlAcquired = true;
+            lock (_cancellationGate)
+            {
+                scan = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                _scanCancellation = scan;
+            }
+            cancellationToken = scan.Token;
             NetworkAdapterInfo? adapter = SelectAdapter(adapterId);
             if (adapter is null)
             {
@@ -209,39 +256,70 @@ public sealed class LanPilotCoordinator(
         }
         finally
         {
+            lock (_cancellationGate) { if (ReferenceEquals(_scanCancellation, scan)) _scanCancellation = null; }
+            scan?.Dispose();
+            if (controlAcquired) _controlGate.Release();
             _gate.Release();
         }
     }
 
     public async Task<OperationResult> SetControlAsync(bool enabled, CancellationToken cancellationToken)
     {
-        await _gate.WaitAsync(cancellationToken);
+        if (!enabled) return await SuspendAllAsync("UserPause", cancellationToken);
+        if (!IsInitialized) return new(false, "Service initialization is still in progress.");
+        return await ResumeAsync(true, cancellationToken);
+    }
+
+    public async Task<OperationResult> OpenUiAsync(CancellationToken token)
+    {
+        if (!IsInitialized) return new(false, "Service initialization is still in progress.");
+        if (_safety.RequiresManualResume) return new(false, "Control is suspended. Resume manually after checking diagnostics.");
+        if (_safety.ApplicationsActive) return new(true, "Application control is already active.");
+        return await ResumeAsync(_settings.AutoControl && _network?.AutoControl == true, token);
+    }
+
+    private async Task<OperationResult> ResumeAsync(bool devices, CancellationToken cancellationToken)
+    {
+        int generation = Volatile.Read(ref _controlGeneration);
+        await _controlGate.WaitAsync(cancellationToken);
         try
         {
-            if (!enabled)
+            IsTransitioning = true;
+            lock (_cancellationGate)
             {
-                Interlocked.Increment(ref _controlGeneration);
-                await trafficEngine.StopAsync(true, cancellationToken);
-                sessionJournal.Clear();
-                SetStatus(_status.NpcapAvailable ? EngineMode.Idle : EngineMode.DriverUnavailable, "Traffic control is paused and network state was restored.");
-                RaiseSnapshotChanged();
-                return new OperationResult(true, "Traffic control paused and ARP state restored.");
+                if (generation != Volatile.Read(ref _controlGeneration)) return new(false, "Resume superseded by pause.");
+                _controlCancellation.Dispose();
+                _controlCancellation = new();
             }
-
-            if (trafficEngine.IsRunning && _status.Mode == EngineMode.Controlling)
+            using CancellationTokenSource operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _controlCancellation.Token);
+            cancellationToken = operation.Token;
+            SetStatus(EngineMode.Recovering, "Preparing control; cleaning the previous session…");
+            await StopDevicesAndRecoverAsync(cancellationToken);
+            // Clean stale Windows rules before applying the saved configuration.
+            await applicationTrafficController.SuspendAllAsync(cancellationToken);
+            lock (_cancellationGate)
             {
-                return new OperationResult(true, _status.Message);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (generation != Volatile.Read(ref _controlGeneration)) throw new OperationCanceledException();
+                _safety = new("None", false, true, true, DateTimeOffset.UtcNow);
             }
-
-            if (!_status.NpcapAvailable)
+            await _safetyJournal.SaveAsync(_safety, cancellationToken);
+            foreach (LocalApplicationPolicy policy in _applicationPolicies.Values)
+                await applicationTrafficController.ApplyAsync(policy, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            RefreshNpcapStatus(DateTimeOffset.Now, true);
+            if (!devices || !_status.NpcapAvailable)
             {
-                return new OperationResult(false, "Npcap is required for traffic control.");
+                SetStatus(_status.NpcapAvailable ? EngineMode.Idle : EngineMode.DriverUnavailable,
+                    "Application control active. Device control is not active.");
+                return new(true, _status.Message);
             }
 
             NetworkAdapterInfo? adapter = SelectAdapter(_settings.SelectedAdapterId);
             if (adapter is null || _network is null)
             {
-                return new OperationResult(false, "Select an active network adapter first.");
+                SetStatus(EngineMode.Idle, "Application control active. Select a network adapter for device control.");
+                return new(true, _status.Message);
             }
 
             DeviceSnapshot[] effective = GetEffectiveDevices();
@@ -250,7 +328,7 @@ public sealed class LanPilotCoordinator(
                 .ToArray();
             await sessionJournal.SaveAsync(new ControlSession(adapter, _network, intercepted, DateTimeOffset.Now), cancellationToken);
             await trafficEngine.StartAsync(adapter, _network, effective, cancellationToken);
-            Interlocked.Increment(ref _controlGeneration);
+            cancellationToken.ThrowIfCancellationRequested();
             _lastOnlineRefresh = DateTimeOffset.Now;
             _lastKnownDeviceRefresh = _lastOnlineRefresh;
             SetStatus(EngineMode.Controlling, BuildControlStatusMessage(effective));
@@ -259,27 +337,84 @@ public sealed class LanPilotCoordinator(
         }
         catch (Exception ex)
         {
-            try { await trafficEngine.StopAsync(true, CancellationToken.None); } catch { }
-            sessionJournal.Clear();
             logger.LogError(ex, "Traffic control could not start.");
-            SetStatus(EngineMode.Faulted, ex.Message);
-            NotificationRaised?.Invoke(this,
-                new NotificationEvent("Traffic control error", ex.Message, NotificationSeverity.Error));
+            await SuspendCoreAsync(generation == Volatile.Read(ref _controlGeneration) ? "Fault" : _safety.Reason);
             return new OperationResult(false, ex.Message);
         }
         finally
         {
-            _gate.Release();
+            IsTransitioning = false;
+            _controlGate.Release();
         }
     }
 
     public async Task EmergencyPauseAsync(CancellationToken cancellationToken)
     {
-        Interlocked.Increment(ref _controlGeneration);
-        await trafficEngine.StopAsync(true, cancellationToken);
-        sessionJournal.Clear();
-        SetStatus(_status.NpcapAvailable ? EngineMode.Idle : EngineMode.DriverUnavailable, "Emergency pause completed. Network state was restored.");
+        OperationResult result = await SuspendAllAsync("UserPause", cancellationToken);
+        if (!result.Success) throw new InvalidOperationException(result.Message);
+    }
+
+    public async Task<OperationResult> SuspendAllAsync(string reason, CancellationToken cancellationToken, string? failureReason = null)
+    {
+        lock (_cancellationGate)
+        {
+            Interlocked.Increment(ref _controlGeneration);
+            _safety = new(_safety.Reason == "Fault" ? "Fault" : reason,
+                reason is "Fault" or "UserPause" or "NetworkChanged" || _safety.Reason == "Fault", false, _safety.ApplicationsActive, DateTimeOffset.UtcNow,
+                failureReason ?? _safety.FailureReason);
+            _controlCancellation.Cancel();
+            _scanCancellation?.Cancel();
+        }
+        // Publish intent before waiting for an in-flight command. Persistence failure
+        // must never prevent cancellation and independent best-effort cleanup.
+        try { await _safetyJournal.SaveAsync(_safety, CancellationToken.None); }
+        catch (Exception ex) { logger.LogError(ex, "Could not persist suspension intent."); }
+        await _controlGate.WaitAsync(CancellationToken.None);
+        try { return await SuspendCoreAsync(_safety.Reason); }
+        finally { _controlGate.Release(); }
+    }
+
+    private async Task<OperationResult> SuspendCoreAsync(string reason)
+    {
+        _safety = new(reason, reason is "Fault" or "UserPause" or "NetworkChanged", false, _safety.ApplicationsActive, DateTimeOffset.UtcNow, _safety.FailureReason);
+        List<Exception> errors = [];
+        try { await _safetyJournal.SaveAsync(_safety, CancellationToken.None); }
+        catch (Exception ex) { errors.Add(ex); }
+        using CancellationTokenSource cleanup = new(TimeSpan.FromSeconds(15));
+        // Do not let a failed limiter prevent ARP restoration (or vice versa).
+        async Task<Exception?> StopDevices()
+        {
+            try { await StopDevicesAndRecoverAsync(cleanup.Token); return null; }
+            catch (Exception ex) { return ex; }
+        }
+        async Task<Exception?> StopApplications()
+        {
+            try { await applicationTrafficController.SuspendAllAsync(cleanup.Token); return null; }
+            catch (Exception ex) { return ex; }
+        }
+        Exception?[] results = await Task.WhenAll(Task.Run(StopDevices), Task.Run(StopApplications));
+        errors.AddRange(results.OfType<Exception>());
+        _safety = _safety with { RestorationComplete = errors.Count == 0, ApplicationsActive = results[1] is not null, UpdatedAt = DateTimeOffset.UtcNow };
+        try { await _safetyJournal.SaveAsync(_safety, CancellationToken.None); }
+        catch (Exception ex) { errors.Add(ex); _safety = _safety with { RestorationComplete = false }; }
+        foreach (Exception error in errors) logger.LogError(error, "Control restoration step failed.");
+        string message = errors.Count == 0 ? "All LanPilot control is suspended. Internet access restored."
+            : "Restoration incomplete. Some LanPilot controls may remain active; export diagnostics and retry Emergency pause.";
+        SetStatus(errors.Count == 0 ? EngineMode.Idle : EngineMode.Faulted, message);
+        diagnostics.Record("LanPilot.Control", errors.Count == 0 ? "Information" : "Error", $"Suspended: {reason}; restored={errors.Count == 0}");
+        if (reason == "Fault" || errors.Count != 0)
+            NotificationRaised?.Invoke(this, new NotificationEvent("Control suspended", message, NotificationSeverity.Warning));
         RaiseSnapshotChanged();
+        return new(errors.Count == 0, message);
+    }
+
+    private async Task StopDevicesAndRecoverAsync(CancellationToken token)
+    {
+        bool wasRunning = trafficEngine.IsRunning;
+        await trafficEngine.StopAsync(true, token);
+        if (!wasRunning && await sessionJournal.LoadAsync(token) is ControlSession previous)
+            await trafficEngine.RestoreAbandonedSessionAsync(previous, token).WaitAsync(TimeSpan.FromSeconds(5), token);
+        sessionJournal.Clear();
     }
 
     public async Task<OperationResult> UpdatePolicyAsync(DevicePolicy policy, CancellationToken cancellationToken)
@@ -300,7 +435,7 @@ public sealed class LanPilotCoordinator(
         DeviceSnapshot updated = device with { Policy = policy, GroupId = policy.GroupId };
         _devices[updated.Id] = updated;
         await store.SaveDeviceAsync(updated, cancellationToken);
-        RefreshEngineTargets();
+        await RefreshEngineTargetsAsync(cancellationToken);
         RaiseSnapshotChanged();
         return new OperationResult(true, "Device policy saved.");
     }
@@ -345,7 +480,7 @@ public sealed class LanPilotCoordinator(
             trafficEngine.ResetCounters(reset.Id);
             await store.DeleteTrafficHistoryAsync(reset.Id, cancellationToken);
             await store.SaveDeviceAsync(reset, cancellationToken);
-            RefreshEngineTargets();
+            await RefreshEngineTargetsAsync(cancellationToken);
             RaiseSnapshotChanged();
             return new OperationResult(true, $"{reset.DisplayName} was reset and moved to Guests.");
         }
@@ -366,7 +501,7 @@ public sealed class LanPilotCoordinator(
         GroupPolicy normalized = group with { Name = name };
         _groups[normalized.Id] = normalized;
         await store.SaveGroupAsync(normalized, cancellationToken);
-        RefreshEngineTargets();
+        await RefreshEngineTargetsAsync(cancellationToken);
         RaiseSnapshotChanged();
         return new OperationResult(true, "Group saved.");
     }
@@ -398,7 +533,7 @@ public sealed class LanPilotCoordinator(
             await store.DeleteScheduleAsync(schedule.Id, cancellationToken);
         }
 
-        RefreshEngineTargets();
+        await RefreshEngineTargetsAsync(cancellationToken);
         RaiseSnapshotChanged();
         return new OperationResult(true, $"Group '{removed.Name}' deleted. Its devices were moved to Guests.");
     }
@@ -410,7 +545,7 @@ public sealed class LanPilotCoordinator(
         if (schedule.Days.Length == 0) return new OperationResult(false, "Select at least one day.");
         _schedules[schedule.Id] = schedule;
         await store.SaveScheduleAsync(schedule, cancellationToken);
-        RefreshEngineTargets();
+        await RefreshEngineTargetsAsync(cancellationToken);
         RaiseSnapshotChanged();
         return new OperationResult(true, "Schedule saved.");
     }
@@ -420,7 +555,7 @@ public sealed class LanPilotCoordinator(
         if (!_schedules.TryRemove(scheduleId, out _))
             return new OperationResult(false, "Schedule not found.");
         await store.DeleteScheduleAsync(scheduleId, cancellationToken);
-        RefreshEngineTargets();
+        await RefreshEngineTargetsAsync(cancellationToken);
         RaiseSnapshotChanged();
         return new OperationResult(true, "Schedule deleted.");
     }
@@ -483,21 +618,64 @@ public sealed class LanPilotCoordinator(
                 : new OperationResult(true, "No application restriction is configured.");
         }
 
-        await applicationTrafficController.ApplyAsync(normalized, cancellationToken);
-        _applicationPolicies[normalized.Id] = normalized;
-        await store.SaveApplicationPolicyAsync(normalized, cancellationToken);
-        return new OperationResult(true, "Application network policy saved.");
+        return await ChangeApplicationPolicyAsync(normalized.Id, normalized, cancellationToken);
     }
 
     public async Task<OperationResult> DeleteApplicationPolicyAsync(string policyId, CancellationToken cancellationToken)
     {
-        if (!_applicationPolicies.TryGetValue(policyId, out LocalApplicationPolicy? policy))
-            return new OperationResult(false, "Application policy not found.");
+        return await ChangeApplicationPolicyAsync(policyId, null, cancellationToken);
+    }
 
-        await applicationTrafficController.RemoveAsync(policy, cancellationToken);
-        await store.DeleteApplicationPolicyAsync(policyId, cancellationToken);
-        _applicationPolicies.TryRemove(policyId, out _);
-        return new OperationResult(true, "Application network policy removed.");
+    private async Task<OperationResult> ChangeApplicationPolicyAsync(string id, LocalApplicationPolicy? next, CancellationToken token)
+    {
+        int generation = Volatile.Read(ref _controlGeneration);
+        await _controlGate.WaitAsync(token);
+        try
+        {
+            _applicationPolicies.TryGetValue(id, out LocalApplicationPolicy? previous);
+            if (previous is null && next is null) return new(true, "No application restriction is configured.");
+            bool apply = !IsSuspended && _safety.ApplicationsActive && generation == Volatile.Read(ref _controlGeneration);
+            using CancellationTokenSource operation = CancellationTokenSource.CreateLinkedTokenSource(token, _controlCancellation.Token);
+            try
+            {
+                if (apply)
+                {
+                    if (next is null) await applicationTrafficController.RemoveAsync(previous!, operation.Token);
+                    else await applicationTrafficController.ApplyAsync(next, operation.Token);
+                    operation.Token.ThrowIfCancellationRequested();
+                }
+                if (next is null) await store.DeleteApplicationPolicyAsync(id, token);
+                else await store.SaveApplicationPolicyAsync(next, token);
+                if (next is null) _applicationPolicies.TryRemove(id, out _);
+                else _applicationPolicies[id] = next;
+                return new(true, apply ? "Application policy saved and applied." : "Policy saved. Control remains suspended until resumed.");
+            }
+            catch (Exception ex)
+            {
+                if (apply)
+                {
+                    // Never re-apply a previous blocking rule after an emergency request.
+                    if (generation != Volatile.Read(ref _controlGeneration) || IsSuspended)
+                        await SuspendCoreAsync(_safety.Reason);
+                    else
+                    {
+                        try
+                        {
+                            if (previous is null) await applicationTrafficController.RemoveAsync(next!, CancellationToken.None);
+                            else await applicationTrafficController.ApplyAsync(previous, CancellationToken.None);
+                        }
+                        catch (Exception rollback)
+                        {
+                            logger.LogError(rollback, "Application policy rollback failed.");
+                            await SuspendCoreAsync("Fault");
+                        }
+                    }
+                }
+                logger.LogWarning(ex, "Application policy transaction failed.");
+                return new(false, "Application policy was not saved. Check diagnostics for the failure and restoration result.");
+            }
+        }
+        finally { _controlGate.Release(); }
     }
 
     public async Task<OperationResult> ApplyPresetAsync(ApplyPresetRequest request, CancellationToken cancellationToken)
@@ -524,7 +702,7 @@ public sealed class LanPilotCoordinator(
             await store.SaveDeviceAsync(updated, cancellationToken);
         }
 
-        RefreshEngineTargets();
+        await RefreshEngineTargetsAsync(cancellationToken);
         RaiseSnapshotChanged();
         return new OperationResult(true, $"Preset '{preset.Name}' applied.");
     }
@@ -535,17 +713,61 @@ public sealed class LanPilotCoordinator(
     {
         NetworkAdapterInfo? adapter = SelectAdapter(request.AdapterId);
         if (adapter is null) return new OperationResult(false, "Adapter not found.");
-        _settings = _settings with { SelectedAdapterId = adapter.Id, AutoControl = request.AutoControl };
-        _network = BuildKnownProfile(adapter) with { AutoControl = request.AutoControl };
-        _networks[_network.Id] = _network;
-        await store.SaveSettingsAsync(_settings, cancellationToken);
-        await store.SaveNetworkAsync(_network, cancellationToken);
-        RaiseSnapshotChanged();
-        return new OperationResult(true, "Network settings saved.");
+        if (_network is not null && (_network.Id != NetworkScanner.BuildProfile(adapter).Id || _settings.SelectedAdapterId != adapter.Id))
+        {
+            return await ChangeNetworkIdentityAsync(adapter, _adapters, request.AutoControl, cancellationToken);
+        }
+        await _controlGate.WaitAsync(cancellationToken);
+        try
+        {
+            _settings = _settings with { SelectedAdapterId = adapter.Id, AutoControl = request.AutoControl };
+            _network = BuildKnownProfile(adapter) with { AutoControl = request.AutoControl };
+            _networks[_network.Id] = _network;
+            await store.SaveSettingsAsync(_settings, cancellationToken);
+            await store.SaveNetworkAsync(_network, cancellationToken);
+            RaiseSnapshotChanged();
+            return new OperationResult(true, "Network settings saved.");
+        }
+        finally { _controlGate.Release(); }
+    }
+
+    private async Task<OperationResult> ChangeNetworkIdentityAsync(NetworkAdapterInfo? adapter,
+        IReadOnlyList<NetworkAdapterInfo> adapters, bool autoControl, CancellationToken token)
+    {
+        OperationResult stopped = await SuspendAllAsync("NetworkChanged", token);
+        if (!stopped.Success) return stopped;
+        await _controlGate.WaitAsync(token);
+        try
+        {
+            // Invalidate resumes queued before the new network identity is committed.
+            lock (_cancellationGate) { Interlocked.Increment(ref _controlGeneration); _controlCancellation.Cancel(); }
+            if (trafficEngine.IsRunning || _safety.ApplicationsActive)
+            {
+                stopped = await SuspendCoreAsync(_safety.Reason == "Fault" ? "Fault" : "NetworkChanged");
+                if (!stopped.Success) return stopped;
+            }
+            _adapters = adapters;
+            _settings = _settings with { SelectedAdapterId = adapter?.Id ?? _settings.SelectedAdapterId, AutoControl = autoControl };
+            _network = adapter is null ? null : BuildKnownProfile(adapter) with { AutoControl = autoControl };
+            await store.SaveSettingsAsync(_settings, token);
+            if (_network is not null)
+            {
+                _networks[_network.Id] = _network;
+                await store.SaveNetworkAsync(_network, token);
+            }
+            RaiseSnapshotChanged();
+            return new(true, "Network changed safely. Scan and resume control manually.");
+        }
+        finally { _controlGate.Release(); }
     }
 
     public async Task<OperationResult> UpdateSettingsAsync(AppSettings settings, CancellationToken cancellationToken)
     {
+        if (settings.SelectedAdapterId is string adapterId && adapterId != _settings.SelectedAdapterId)
+        {
+            OperationResult changed = await UpdateNetworkSettingsAsync(new(adapterId, settings.AutoControl), cancellationToken);
+            if (!changed.Success) return changed;
+        }
         _settings = settings with
         {
             HistoryRetentionDays = Math.Clamp(settings.HistoryRetentionDays, 1, 365),
@@ -574,6 +796,57 @@ public sealed class LanPilotCoordinator(
         return new OperationResult(true, "Backup imported.");
     }
 
+    public object GetDiagnosticState(bool includePolicies) => new
+    {
+        mode = _status.Mode,
+        safety = _safety,
+        _status.NpcapAvailable,
+        _status.NpcapVersion,
+        _status.Ipv6Detected,
+        settings = _settings,
+        networkId = _network?.Id,
+        controlGeneration = Volatile.Read(ref _controlGeneration),
+        lastTickStarted = Interlocked.Read(ref _lastTickStarted),
+        lastTickCompleted = Interlocked.Read(ref _lastTickCompleted),
+        currentTick = Environment.TickCount64,
+        discoveryTask = _deviceRefreshTask?.Status.ToString(),
+        devices = _devices.Count,
+        online = _devices.Values.Count(device => device.IsOnline),
+        applicationPolicyCount = _applicationPolicies.Count,
+        schedules = _schedules.Count,
+        // Do not include custom names, executable paths, or traffic destinations.
+        effectiveDevicePolicies = GetEffectiveDevices().Take(includePolicies ? 512 : 32).Select(device => new
+        {
+            device.Id,
+            device.IsOnline,
+            device.IsLocalComputer,
+            device.IsGateway,
+            device.Policy
+        }).ToArray(),
+        applicationPolicies = _applicationPolicies.Values.Take(includePolicies ? 512 : 32).Select(policy => new
+        {
+            policy.Id,
+            policy.BlockInternet,
+            policy.DownloadLimitBitsPerSecond,
+            policy.UploadLimitBitsPerSecond
+        }).ToArray(),
+        scheduleRules = includePolicies ? _schedules.Values.Take(512).Select(rule => new
+        {
+            rule.Id,
+            rule.DeviceId,
+            rule.GroupId,
+            rule.Enabled,
+            rule.Start,
+            rule.End,
+            rule.Days,
+            rule.BlockInternet,
+            rule.DownloadLimitBitsPerSecond,
+            rule.UploadLimitBitsPerSecond,
+            active = PolicyResolver.IsActive(rule, DateTimeOffset.Now)
+        }).ToArray() : null,
+        policyExportLimit = includePolicies ? 512 : 32
+    };
+
     public async Task<OperationResult> ExportDiagnosticsAsync(ExportRequest request, CancellationToken cancellationToken)
     {
         string destination = Path.GetFullPath(request.DestinationPath);
@@ -586,28 +859,59 @@ public sealed class LanPilotCoordinator(
         using (ZipArchive archive = new(file, ZipArchiveMode.Create))
         {
             ZipArchiveEntry reportEntry = archive.CreateEntry("diagnostics.json", CompressionLevel.Optimal);
-            await using Stream report = reportEntry.Open();
-            await JsonSerializer.SerializeAsync(report, new
-            {
-                formatVersion = 1,
-                generatedAt = DateTimeOffset.Now,
-                os = Environment.OSVersion.VersionString,
-                processArchitecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
-                status = _status,
-                activeNetwork = _network,
-                adapters = _adapters,
-                deviceSummary = new
+            await using (Stream report = reportEntry.Open())
+                await JsonSerializer.SerializeAsync(report, new
                 {
-                    total = _devices.Count,
-                    online = _devices.Values.Count(item => item.IsOnline),
-                    limitedOrBlocked = _devices.Values.Count(HasActiveControl),
-                    blocked = _devices.Values.Count(item => item.Policy.BlockInternet)
-                }
-            }, PipeProtocol.JsonOptions, cancellationToken);
+                    formatVersion = 2,
+                    generatedAt = DateTimeOffset.Now,
+                    versions = DiagnosticWorker.CaptureSafely(DiagnosticWorker.CaptureVersions),
+                    process = DiagnosticWorker.CaptureSafely(DiagnosticWorker.CaptureProcess),
+                    interfaces = DiagnosticWorker.CaptureSafely(DiagnosticWorker.CaptureInterfaces),
+                    control = DiagnosticWorker.CaptureSafely(() => GetDiagnosticState(true)),
+                    deviceTraffic = DiagnosticWorker.CaptureSafely(trafficEngine.GetDiagnostics),
+                    applicationLimiter = DiagnosticWorker.CaptureSafely(applicationLimiter.GetDiagnostics),
+                    applicationMonitor = DiagnosticWorker.CaptureSafely(applicationMonitor.GetDiagnostics),
+                    os = Environment.OSVersion.VersionString,
+                    processArchitecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+                    status = new
+                    {
+                        _status.Mode,
+                        _status.NpcapAvailable,
+                        _status.NpcapVersion,
+                        _status.Ipv6Detected,
+                        _status.AutoControl,
+                        _status.ActiveNetworkId,
+                        _status.UpdatedAt
+                    },
+                    activeNetwork = _network,
+                    adapters = _adapters,
+                    deviceSummary = new
+                    {
+                        total = _devices.Count,
+                        online = _devices.Values.Count(item => item.IsOnline),
+                        limitedOrBlocked = _devices.Values.Count(HasActiveControl),
+                        blocked = _devices.Values.Count(item => item.Policy.BlockInternet)
+                    }
+                }, PipeProtocol.JsonOptions, cancellationToken);
+
+            await diagnostics.ExportAsync(archive, cancellationToken);
+
+            await using (Stream windowsReport = archive.CreateEntry("windows-policies.json", CompressionLevel.Optimal).Open())
+                await JsonSerializer.SerializeAsync(windowsReport,
+                    await WindowsPolicyDiagnostics.CaptureAsync(cancellationToken), PipeProtocol.JsonOptions, cancellationToken);
 
             ZipArchiveEntry noteEntry = archive.CreateEntry("README.txt");
             await using StreamWriter note = new(noteEntry.Open());
-            await note.WriteAsync("LanPilot diagnostics bundle. No packet payloads, DNS queries, domains, or browsing content are collected.");
+            await note.WriteAsync("LanPilot diagnostics v2. Export during the outage BEFORE pausing/exiting; export again after recovery. " +
+                "flight-recorder.json contains up to 30 minutes of 5-second health samples and 1000 recent events. " +
+                "history contains up to three 2 MiB rolling service journals, including previous sessions; last seconds may be lost on a crash. " +
+                "Packet counters are cumulative per service session, not speed readings. A quiet link alone is not proof of a fault. " +
+                "limited means rate-dropped device packets or queued application packets; queueFull counts application queue drops. " +
+                "Zero/missing last activity means no activity recorded. Samples and queues are bounded and may be truncated. " +
+                "Exception messages/arguments, packet payloads, remote flow addresses, DNS queries, domains, and browsing content are not recorded. " +
+                "Local network/adapter identifiers and configured policy IDs are included. Share privately. " +
+                "Emergency pause suspends device forwarding and LanPilot application policies; inspect safety.restorationComplete for the cleanup result. " +
+                "No connectivity probes are sent and no Windows settings are changed by diagnostics.");
         }
 
         File.Move(temporary, destination, true);
@@ -616,8 +920,15 @@ public sealed class LanPilotCoordinator(
 
     public async Task TickAsync(CancellationToken cancellationToken)
     {
+        Interlocked.Exchange(ref _lastTickStarted, Environment.TickCount64);
         IReadOnlyDictionary<string, TrafficCounter> counters = trafficEngine.ReadAndResetCounters();
         DateTimeOffset now = DateTimeOffset.Now;
+        RefreshNpcapStatus(now);
+        if (now - _lastNetworkRefresh > TimeSpan.FromSeconds(10) && _networkRefreshTask is not { IsCompleted: false })
+        {
+            _lastNetworkRefresh = now;
+            _networkRefreshTask = RefreshNetworkAsync(cancellationToken);
+        }
         double elapsedSeconds = Math.Clamp((now - _lastCounterRead).TotalSeconds, 0.1d, 5d);
         _lastCounterRead = now;
         foreach ((string id, TrafficCounter counter) in counters)
@@ -647,7 +958,7 @@ public sealed class LanPilotCoordinator(
 
         if (trafficEngine.IsRunning) ScheduleDeviceRefresh(now, cancellationToken);
 
-        if (trafficEngine.IsRunning) RefreshEngineTargets();
+        if (trafficEngine.IsRunning) await RefreshEngineTargetsAsync(cancellationToken);
         if (now - _lastRollup >= TimeSpan.FromMinutes(1))
         {
             TrafficSample[] samples = _minuteCounters.Select(item =>
@@ -670,6 +981,7 @@ public sealed class LanPilotCoordinator(
         }
 
         RaiseSnapshotChanged();
+        Interlocked.Exchange(ref _lastTickCompleted, Environment.TickCount64);
     }
 
     private async Task ReloadAsync(CancellationToken cancellationToken)
@@ -686,6 +998,27 @@ public sealed class LanPilotCoordinator(
         RaiseSnapshotChanged();
     }
 
+    private async Task RefreshNetworkAsync(CancellationToken token)
+    {
+        try
+        {
+            NetworkAdapterInfo? previous = SelectAdapter(_settings.SelectedAdapterId);
+            IReadOnlyList<NetworkAdapterInfo> current = await scanner.GetAdaptersAsync(_settings.SelectedAdapterId, token);
+            NetworkAdapterInfo? selected = current.FirstOrDefault(adapter => adapter.Id == _settings.SelectedAdapterId);
+            bool changed = previous is not null && (selected is null || previous.Ipv4Address != selected.Ipv4Address ||
+                previous.GatewayAddress != selected.GatewayAddress || previous.GatewayMac != selected.GatewayMac || previous.PrefixLength != selected.PrefixLength);
+            if (changed)
+            {
+                if (_settings.SelectedAdapterId != previous!.Id) return;
+                await ChangeNetworkIdentityAsync(selected, current, false, token);
+                return;
+            }
+            _adapters = current;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        { logger.LogWarning(ex, "Network identity refresh failed."); }
+    }
+
     private DeviceSnapshot[] GetEffectiveDevices()
     {
         DateTimeOffset now = DateTimeOffset.Now;
@@ -700,9 +1033,30 @@ public sealed class LanPilotCoordinator(
             .ToArray();
     }
 
-    private void RefreshEngineTargets()
+    private async Task RefreshEngineTargetsAsync(CancellationToken token)
     {
-        if (trafficEngine.IsRunning) trafficEngine.UpdateTargets(GetEffectiveDevices());
+        await _controlGate.WaitAsync(token);
+        try
+        {
+            if (IsSuspended || !trafficEngine.IsRunning || _network is null) return;
+            NetworkAdapterInfo? adapter = SelectAdapter(_settings.SelectedAdapterId);
+            if (adapter is null) return;
+            DeviceSnapshot[] devices = GetEffectiveDevices();
+            // Persist the union: peers that just went offline may still have a poisoned ARP cache.
+            ControlSession? previous = await sessionJournal.LoadAsync(token);
+            DeviceSnapshot[] targets = (previous?.Targets ?? []).Concat(devices.Where(device => device.IsOnline && !device.IsGateway && !device.IsLocalComputer))
+                .GroupBy(device => (device.Id, device.Ipv4Address, device.MacAddress)).Select(group => group.Last()).ToArray();
+            if (targets.Length > 4096) throw new InvalidDataException("Recovery target history reached its safety limit; restart control manually after recovery.");
+            if (previous is null || targets.Length != previous.Targets.Count)
+                await sessionJournal.SaveAsync(new ControlSession(adapter, _network, targets, previous?.StartedAt ?? DateTimeOffset.Now), token);
+            if (!IsSuspended) trafficEngine.UpdateTargets(devices);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Could not safely update forwarding targets.");
+            await SuspendCoreAsync("Fault");
+        }
+        finally { _controlGate.Release(); }
     }
 
     private void ScheduleDeviceRefresh(DateTimeOffset now, CancellationToken cancellationToken)
@@ -776,8 +1130,9 @@ public sealed class LanPilotCoordinator(
             }
 
             DeviceSnapshot[] effective = GetEffectiveDevices();
-            RefreshEngineTargets();
-            SetStatus(EngineMode.Controlling, BuildControlStatusMessage(effective));
+            await RefreshEngineTargetsAsync(cancellationToken);
+            if (generation == Volatile.Read(ref _controlGeneration) && !IsSuspended && trafficEngine.IsRunning)
+                SetStatus(EngineMode.Controlling, BuildControlStatusMessage(effective));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -795,7 +1150,9 @@ public sealed class LanPilotCoordinator(
             Dictionary<string, DeviceSnapshot> known = _devices.Values
                 .Where(item => item.NetworkId == network.Id)
                 .ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
-            IReadOnlyList<DeviceSnapshot> online = await scanner.ProbeKnownDevicesAsync(known, cancellationToken);
+            NetworkAdapterInfo? adapter = SelectAdapter(_settings.SelectedAdapterId);
+            if (adapter is null) return;
+            IReadOnlyList<DeviceSnapshot> online = await scanner.ProbeKnownDevicesAsync(known, cancellationToken, IPAddress.Parse(adapter.Ipv4Address));
             if (generation != Volatile.Read(ref _controlGeneration) || !trafficEngine.IsRunning) return;
             bool stateChanged = false;
             foreach (DeviceSnapshot device in online)
@@ -810,8 +1167,9 @@ public sealed class LanPilotCoordinator(
             if (stateChanged)
             {
                 DeviceSnapshot[] effective = GetEffectiveDevices();
-                RefreshEngineTargets();
-                SetStatus(EngineMode.Controlling, BuildControlStatusMessage(effective));
+                await RefreshEngineTargetsAsync(cancellationToken);
+                if (generation == Volatile.Read(ref _controlGeneration) && !IsSuspended && trafficEngine.IsRunning)
+                    SetStatus(EngineMode.Controlling, BuildControlStatusMessage(effective));
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -931,9 +1289,9 @@ public sealed class LanPilotCoordinator(
         }
     }
 
-    private NetworkAdapterInfo? SelectAdapter(string? adapterId) =>
-        _adapters.FirstOrDefault(item => string.Equals(item.Id, adapterId, StringComparison.OrdinalIgnoreCase))
-        ?? _adapters.FirstOrDefault();
+    private NetworkAdapterInfo? SelectAdapter(string? adapterId) => string.IsNullOrWhiteSpace(adapterId)
+        ? _adapters.FirstOrDefault()
+        : _adapters.FirstOrDefault(item => string.Equals(item.Id, adapterId, StringComparison.OrdinalIgnoreCase));
 
     private NetworkProfile BuildKnownProfile(NetworkAdapterInfo adapter)
     {
@@ -943,6 +1301,40 @@ public sealed class LanPilotCoordinator(
             : provisional;
     }
 
+    private void RefreshNpcapStatus(DateTimeOffset now, bool force = false)
+    {
+        if (!force && now - _lastNpcapRefresh < NpcapRefreshInterval) return;
+        _lastNpcapRefresh = now;
+
+        (bool available, string? version) = NpcapDetector.Detect();
+        if (available == _status.NpcapAvailable &&
+            string.Equals(version, _status.NpcapVersion, StringComparison.OrdinalIgnoreCase)) return;
+
+        EngineMode mode = _status.Mode;
+        string message = _status.Message;
+        if (available && mode == EngineMode.DriverUnavailable)
+        {
+            mode = EngineMode.Idle;
+            message = "Npcap detected. Ready to scan and start traffic control.";
+        }
+        else if (!available && !trafficEngine.IsRunning &&
+                 mode is EngineMode.Idle or EngineMode.Monitoring or EngineMode.DriverUnavailable)
+        {
+            mode = EngineMode.DriverUnavailable;
+            message = "Npcap is not installed. Discovery-only mode is available.";
+        }
+
+        _status = _status with
+        {
+            Mode = mode,
+            Message = message,
+            NpcapAvailable = available,
+            NpcapVersion = version,
+            UpdatedAt = now
+        };
+        RaiseSnapshotChanged();
+    }
+
     private void SetStatus(
         EngineMode mode,
         string message,
@@ -950,6 +1342,8 @@ public sealed class LanPilotCoordinator(
         string? npcapVersion = null,
         bool? ipv6Detected = null)
     {
+        if (_status.Mode != mode)
+            diagnostics.Record("LanPilot.Control", "Information", $"Engine transition: {_status.Mode} -> {mode}");
         _status = new EngineStatus(
             mode,
             message,

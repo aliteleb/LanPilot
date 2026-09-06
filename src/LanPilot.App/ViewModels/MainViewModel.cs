@@ -173,7 +173,7 @@ public partial class MainViewModel : ObservableObject
         get
         {
             Version? version = typeof(MainViewModel).Assembly.GetName().Version;
-            return version is null ? "v0.1.1" : $"v{version.Major}.{version.Minor}.{version.Build}";
+            return version is null ? "Preview" : $"v{version.Major}.{version.Minor}.{version.Build}";
         }
     }
     public string CopyrightText => $"Copyright © {DateTime.Now.Year} Ali Teleb";
@@ -196,6 +196,7 @@ public partial class MainViewModel : ObservableObject
         ? $"↓ {application.DownloadDisplay}   ↑ {application.UploadDisplay}"
         : "Open an application to see its live traffic.";
     public string ControlButtonText => IsControlActive ? "Pause control" : "Start control";
+    public string ApplicationControlNotice { get; private set; } = "LanPilot applies independent download and upload limits per executable.";
     public bool IsScanning => IsScanRequested || EngineMode == EngineMode.Discovering;
     public bool CanScan => IsConnected && !IsScanning;
     public bool CanRefreshApplications => !IsApplicationRefreshInProgress;
@@ -265,19 +266,9 @@ public partial class MainViewModel : ObservableObject
             DashboardSnapshot snapshot = await _client.GetSnapshotAsync(timeout.Token);
             IsConnected = true;
             ApplySnapshot(snapshot);
-            if (_firstRunComplete && snapshot.Status.NpcapAvailable &&
-                snapshot.Status.Mode is EngineMode.Idle or EngineMode.Monitoring)
-            {
-                OperationResult started = await _client.SetControlAsync(true, timeout.Token);
-                if (started.Success && snapshot.Settings.SelectedAdapterId is not null)
-                {
-                    AutoControl = true;
-                    await _client.UpdateNetworkSettingsAsync(
-                        new UpdateNetworkSettingsRequest(snapshot.Settings.SelectedAdapterId, true),
-                        timeout.Token);
-                    await _client.UpdateSettingsAsync(snapshot.Settings with { AutoControl = true }, timeout.Token);
-                }
-            }
+            // Service-owned safety state decides whether startup may restore
+            // saved rules. A reconnect must never override a fault suspension.
+            if (snapshot.ControlSafety is not null) await _client.OpenUiAsync(timeout.Token);
 
             return true;
         }
@@ -334,6 +325,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     public void StopConnectionRecovery() => _lifetimeCancellation.Cancel();
+    public void ReportShutdownFailure(string message) => Notify("Network restoration incomplete", message, NotificationSeverity.Error);
 
     [RelayCommand]
     private async Task ScanAsync()
@@ -1094,9 +1086,17 @@ public partial class MainViewModel : ObservableObject
         _isApplyingSnapshot = true;
         try
         {
-            StatusMessage = snapshot.Status.Message;
+            StatusMessage = snapshot.ControlSafety?.RequiresManualResume == true
+                ? "Control suspended. Resume manually after checking diagnostics. " + snapshot.Status.Message
+                : snapshot.Status.Message;
             EngineMode = snapshot.Status.Mode;
-            IsControlActive = snapshot.Status.Mode == EngineMode.Controlling;
+            ApplicationControlNotice = snapshot.ApplicationMonitoringAvailable == false
+                ? "Live traffic monitoring is unavailable. Zero speeds are not a reliable measurement. Export diagnostics for details."
+                : snapshot.ControlSafety?.RequiresManualResume == true
+                    ? "Control is suspended. Saved limits and blocking are not being applied. Resume manually after checking diagnostics."
+                    : "LanPilot applies independent download and upload limits per executable. Leave either direction Unlimited when it should not be restricted.";
+            OnPropertyChanged(nameof(ApplicationControlNotice));
+            IsControlActive = snapshot.Status.Mode == EngineMode.Controlling || snapshot.ControlSafety?.ApplicationsActive == true;
             NpcapAvailable = snapshot.Status.NpcapAvailable;
             NpcapVersion = snapshot.Status.NpcapVersion ?? "Not detected";
             Ipv6Detected = snapshot.Status.Ipv6Detected;

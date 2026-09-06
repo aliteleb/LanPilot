@@ -6,6 +6,10 @@ For crashes, exact stack traces, Debug builds, and optional native memory dumps,
 
 LanPilot automatically attempts to restart and reconnect to its service. Approve the Windows Administrator prompt when using a development build. An installed build registers `LanPilotService` for delayed automatic start and configures restart recovery.
 
+Reconnecting the UI is different from resuming traffic control. Version 0.1.2
+keeps fault suspension across restarts; use **Start control** explicitly only
+after reviewing the recovery result. Do not repeatedly restart a failing driver.
+
 If it remains offline:
 
 1. Restart LanPilot as Administrator.
@@ -25,7 +29,28 @@ Remote-device traffic becomes visible while control/monitoring is active and the
 
 ## Internet connectivity changes unexpectedly
 
-Use **Emergency pause** immediately. It stops control and sends corrective ARP replies. If necessary, stop the LanPilot Service and reconnect Wi-Fi/Ethernet. Include a diagnostics export when filing a private or sanitized report.
+Use **Emergency pause** immediately. In 0.1.2 it suspends device and application
+control, restores ARP mappings and removes only LanPilot-owned Windows policies.
+Saved rules remain. **Exit** performs the same cleanup; minimizing to the tray
+does not. A partial-restoration warning means success was not confirmed: export
+diagnostics and retry recovery. If needed, reconnect Wi-Fi/Ethernet after stopping
+control. Never remove unrelated Firewall/QoS rules. Share before/after diagnostics
+privately, not as raw public issue attachments.
+
+## Application readings unavailable
+
+The application list can still work when passive traffic monitoring fails. An
+unavailable-monitor warning means zero rates are not a reliable measurement; it
+does not by itself prove an Internet outage. TCP identity backfill can take up to
+five seconds. Unknown UDP flows and fragmented/unclassifiable traffic are not
+assigned to a guessed executable.
+
+## Installer refuses to continue
+
+The 0.1.2 installer aborts if safe suspension, actual service stop (30-second
+deadline), or owned-policy cleanup cannot be confirmed. Keep the installed
+version and export diagnostics; do not manually overwrite live service files.
+The prerelease's real installation/upgrade matrix still needs external testing.
 
 ## SmartScreen warning
 

@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using LanPilot.Contracts;
 using LanPilot.Service.Persistence;
+using LanPilot.Service.Diagnostics;
 using PacketDotNet;
 using SharpPcap;
 using SharpPcap.LibPcap;
@@ -11,8 +12,21 @@ namespace LanPilot.Service.Engine;
 
 public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposable
 {
-    private readonly ConcurrentDictionary<string, TrafficTarget> _targets = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, ObservedDevice> _observedByIp = new(StringComparer.OrdinalIgnoreCase);
+    private sealed record ForwardingTable(IReadOnlyDictionary<string, TrafficTarget> Targets, IReadOnlyDictionary<string, ObservedDevice> Observed);
+    private ForwardingTable _table = new(new Dictionary<string, TrafficTarget>(), new Dictionary<string, ObservedDevice>());
+    private IReadOnlyDictionary<string, TrafficTarget> _targets => Volatile.Read(ref _table).Targets;
+    private IReadOnlyDictionary<string, ObservedDevice> _observedByIp => Volatile.Read(ref _table).Observed;
+    private readonly object _targetGate = new();
+    private HashSet<string> _localAddresses = [];
+    private long _sendStarted, _arpStarted;
+    private readonly Queue<long> _failureTicks = new();
+    private readonly object _failureGate = new();
+    private string? _fault;
+    public string? Fault => Volatile.Read(ref _fault) ??
+        (Interlocked.Read(ref _sendStarted) is long started && started != 0 && Environment.TickCount64 - started > 2000
+            ? "Device packet send exceeded two seconds"
+            : Interlocked.Read(ref _arpStarted) is long arp && arp != 0 && Environment.TickCount64 - arp > 2000
+                ? "ARP maintenance exceeded two seconds" : null);
     private readonly ConcurrentDictionary<string, TrafficCounter> _counters = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private LibPcapLiveDevice? _device;
@@ -22,6 +36,19 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
     private PhysicalAddress? _gatewayMac;
     private Timer? _poisonTimer;
     private bool _managePolicies;
+    private volatile bool _suspendRequested;
+    private readonly object _stopGate = new();
+    private Task? _stopTask;
+    private readonly PacketDiagnostics _diagnostics = new();
+    private long _arpCycles, _arpErrors, _lastArpCycle;
+
+    public object GetDiagnostics() => new
+    {
+        running = IsRunning, managingPolicies = _managePolicies, targets = _targets.Count,
+        observedDevices = _observedByIp.Count, packets = _diagnostics.Snapshot(),
+        arpCycles = Interlocked.Read(ref _arpCycles), arpErrors = Interlocked.Read(ref _arpErrors),
+        lastArpCycleTick = Interlocked.Read(ref _lastArpCycle), currentTick = Environment.TickCount64
+    };
 
     public bool IsRunning => _device?.Started == true;
 
@@ -39,6 +66,11 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
             _adapter = adapter;
             _network = network;
             _managePolicies = managePolicies;
+            _suspendRequested = false;
+            lock (_failureGate) _failureTicks.Clear();
+            Volatile.Write(ref _fault, null);
+            _localAddresses = NetworkInterface.GetAllNetworkInterfaces().SelectMany(nic => nic.GetIPProperties().UnicastAddresses)
+                .Select(address => address.Address.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
             _localMac = GetLocalMac(adapter.Id);
             _gatewayMac = ParseMac(network.GatewayMac);
             if (_localMac is null || _gatewayMac is null)
@@ -53,6 +85,7 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
             }
 
             UpdateTargets(devices);
+            _device = capture;
             capture.OnPacketArrival += OnPacketArrival;
             capture.Open(DeviceModes.MaxResponsiveness, 1);
             string localMacFilter = string.Join(":", _localMac.GetAddressBytes().Select(value => value.ToString("x2")));
@@ -72,14 +105,21 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
 
     public void UpdateTargets(IEnumerable<DeviceSnapshot> devices)
     {
+        lock (_targetGate) UpdateTargetsCore(devices);
+    }
+
+    private void UpdateTargetsCore(IEnumerable<DeviceSnapshot> devices)
+    {
         DeviceSnapshot[] current = devices.Where(item => item.IsOnline).ToArray();
+        ForwardingTable existingTable = Volatile.Read(ref _table);
+        if (_managePolicies && current.Count(item => !item.IsGateway) == existingTable.Observed.Count && current.All(item =>
+            item.IsGateway || existingTable.Observed.TryGetValue(item.Ipv4Address, out ObservedDevice? old) && old.DeviceId == item.Id &&
+            old.IsLocalComputer == item.IsLocalComputer && (item.IsLocalComputer || existingTable.Targets.TryGetValue(item.Id, out TrafficTarget? target) &&
+                target.IpAddress.ToString() == item.Ipv4Address && target.Mac.Equals(ParseMac(item.MacAddress)) && target.Policy == item.Policy))) return;
         Dictionary<string, ObservedDevice> observed = current
             .Where(item => !item.IsGateway)
             .Select(item => new ObservedDevice(item.Id, IPAddress.Parse(item.Ipv4Address), item.IsLocalComputer))
             .ToDictionary(item => item.IpAddress.ToString(), StringComparer.OrdinalIgnoreCase);
-        _observedByIp.Clear();
-        foreach ((string ip, ObservedDevice device) in observed) _observedByIp[ip] = device;
-
         DeviceSnapshot[] active = current
             .Where(item => !item.IsGateway && !item.IsLocalComputer)
             .Select(item => _managePolicies
@@ -96,6 +136,7 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
             .ToArray();
         HashSet<string> activeIds = active.Select(item => item.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        Dictionary<string, TrafficTarget> updated = new(StringComparer.OrdinalIgnoreCase);
         foreach (DeviceSnapshot device in active)
         {
             IPAddress ipAddress = IPAddress.Parse(device.Ipv4Address);
@@ -106,24 +147,29 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
                 existing.IpAddress.Equals(ipAddress) && existing.Mac.Equals(mac))
             {
                 existing.UpdatePolicy(device.Policy);
+                updated[device.Id] = existing;
                 continue;
             }
 
-            if (_targets.TryRemove(device.Id, out TrafficTarget? replaced))
+            if (_targets.TryGetValue(device.Id, out TrafficTarget? replaced))
             {
                 RestoreTarget(replaced);
             }
 
-            _targets[device.Id] = new TrafficTarget(device.Id, ipAddress, mac, device.Policy);
+            updated[device.Id] = new TrafficTarget(device.Id, ipAddress, mac, device.Policy);
         }
 
         foreach (string removedId in _targets.Keys.Where(id => !activeIds.Contains(id)).ToArray())
         {
-            if (_targets.TryRemove(removedId, out TrafficTarget? removed))
+            if (_targets.TryGetValue(removedId, out TrafficTarget? removed))
             {
                 RestoreTarget(removed);
             }
         }
+        ForwardingTable previous = Volatile.Read(ref _table);
+        if (observed.Count != previous.Observed.Count || observed.Any(pair => !previous.Observed.TryGetValue(pair.Key, out var value) || value != pair.Value) ||
+            updated.Count != previous.Targets.Count || updated.Any(pair => !previous.Targets.TryGetValue(pair.Key, out var value) || !ReferenceEquals(value, pair.Value)))
+            Volatile.Write(ref _table, new(updated, observed));
     }
 
     public IReadOnlyDictionary<string, TrafficCounter> ReadAndResetCounters()
@@ -140,7 +186,22 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
 
     public async Task StopAsync(bool restore, CancellationToken cancellationToken)
     {
-        await _lifecycle.WaitAsync(cancellationToken);
+        _suspendRequested = true;
+        Task stop;
+        lock (_stopGate)
+        {
+            // A timed-out native call remains owned by this lifecycle operation.
+            // Never free its resources or allow a new session to reuse them.
+            if (_stopTask is null || _stopTask.IsCompleted)
+                _stopTask = Task.Run(() => StopOwnedAsync(restore));
+            stop = _stopTask;
+        }
+        await stop.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+    }
+
+    private async Task StopOwnedAsync(bool restore)
+    {
+        await _lifecycle.WaitAsync();
         try
         {
             await StopCoreAsync(restore);
@@ -190,52 +251,62 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
         }
         finally
         {
-            await StopCoreAsync(false);
-            _lifecycle.Release();
+            try { await StopCoreAsync(false); }
+            finally { _lifecycle.Release(); }
         }
     }
 
-    private Task StopCoreAsync(bool restore)
+    private async Task StopCoreAsync(bool restore)
     {
-        _poisonTimer?.Dispose();
+        Timer? timer = _poisonTimer;
         _poisonTimer = null;
+        if (timer is not null) await timer.DisposeAsync();
+        List<Exception> errors = [];
 
-        if (_device is not null)
+        LibPcapLiveDevice? device = _device;
+        if (device is not null)
         {
             if (restore)
             {
                 for (int attempt = 0; attempt < 5; attempt++)
                 {
-                    RestoreTargets();
-                    Thread.Sleep(80);
+                    // Retry all peers even if one adapter send fails.
+                    foreach (TrafficTarget target in _targets.Values)
+                    {
+                        try { RestoreTarget(target); }
+                        catch (Exception ex) { if (attempt == 4) errors.Add(ex); }
+                    }
+                    await Task.Delay(80);
                 }
             }
 
-            try
+            foreach (Action cleanup in new Action[]
             {
-                if (_device.Started) _device.StopCapture();
-                _device.OnPacketArrival -= OnPacketArrival;
-                _device.Close();
-                _device.Dispose();
-            }
-            catch (Exception ex)
+                () => { if (device.Started) device.StopCapture(); },
+                () => device.OnPacketArrival -= OnPacketArrival,
+                device.Close, device.Dispose
+            })
             {
-                logger.LogWarning(ex, "Npcap adapter shutdown reported an error.");
+                try { cleanup(); }
+                catch (Exception ex) { errors.Add(ex); logger.LogWarning(ex, "Npcap adapter shutdown reported an error."); }
             }
         }
 
         _device = null;
-        _targets.Clear();
-        _observedByIp.Clear();
+        Volatile.Write(ref _table, new(new Dictionary<string, TrafficTarget>(), new Dictionary<string, ObservedDevice>()));
         _managePolicies = false;
-        return Task.CompletedTask;
+        if (errors.Count != 0) throw new AggregateException("Network restoration was incomplete.", errors);
+        Volatile.Write(ref _fault, null);
+        Interlocked.Exchange(ref _sendStarted, 0);
     }
 
     private void OnPacketArrival(object sender, PacketCapture capture)
     {
         try
         {
+            ForwardingTable table = Volatile.Read(ref _table);
             RawCapture raw = capture.GetPacket();
+            _diagnostics.Received();
             Packet parsed = Packet.ParsePacket(raw.LinkLayerType, raw.Data);
             EthernetPacket? ethernet = parsed.Extract<EthernetPacket>();
             IPv4Packet? ipv4 = parsed.Extract<IPv4Packet>();
@@ -246,7 +317,7 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
 
             if (ethernet.SourceHardwareAddress.Equals(_localMac))
             {
-                if (_observedByIp.TryGetValue(ipv4.SourceAddress.ToString(), out ObservedDevice? localSource) &&
+                if (table.Observed.TryGetValue(ipv4.SourceAddress.ToString(), out ObservedDevice? localSource) &&
                     localSource.IsLocalComputer)
                 {
                     AddCounter(localSource.DeviceId, true, raw.Data.Length);
@@ -255,10 +326,18 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
             }
 
             bool upload = IsUploadFrame(ethernet.SourceHardwareAddress, _gatewayMac);
+            // Npcap observes a copy: never inject local-host traffic back onto
+            // the LAN. Its original belongs to the Windows network stack.
+            if (_localAddresses.Contains(ipv4.DestinationAddress.ToString()))
+            {
+                if (table.Observed.TryGetValue(ipv4.DestinationAddress.ToString(), out ObservedDevice? localDestination) && localDestination.IsLocalComputer)
+                    AddCounter(localDestination.DeviceId, false, raw.Data.Length);
+                return;
+            }
             string observedIp = upload
                 ? ipv4.SourceAddress.ToString()
                 : ipv4.DestinationAddress.ToString();
-            if (!_observedByIp.TryGetValue(observedIp, out ObservedDevice? observed)) return;
+            if (!table.Observed.TryGetValue(observedIp, out ObservedDevice? observed)) return;
 
             if (observed.IsLocalComputer)
             {
@@ -266,15 +345,23 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
                 return;
             }
 
-            if (!_targets.TryGetValue(observed.DeviceId, out TrafficTarget? target))
+            if (!table.Targets.TryGetValue(observed.DeviceId, out TrafficTarget? target))
             {
                 AddCounter(observed.DeviceId, upload, raw.Data.Length);
                 return;
             }
+            if (!CanForwardDevicePacket(upload, ipv4.SourceAddress, ipv4.DestinationAddress, ethernet.SourceHardwareAddress,
+                    target.IpAddress, target.Mac, _gatewayMac, _localAddresses)) return;
 
             RateLimiter limiter = upload ? target.UploadLimiter : target.DownloadLimiter;
-            if (target.Policy.BlockInternet || !limiter.TryConsume(raw.Data.Length))
+            if (!_suspendRequested && target.Policy.BlockInternet)
             {
+                _diagnostics.Blocked();
+                return;
+            }
+            if (!_suspendRequested && !limiter.TryConsume(raw.Data.Length))
+            {
+                _diagnostics.Limited();
                 return;
             }
 
@@ -285,28 +372,48 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
             ReadOnlySpan<byte> source = _localMac.GetAddressBytes();
             destination.CopyTo(forwarded.AsSpan(0, 6));
             source.CopyTo(forwarded.AsSpan(6, 6));
-            _device.SendPacket(forwarded);
+            Interlocked.Exchange(ref _sendStarted, Environment.TickCount64);
+            try { _device.SendPacket(forwarded); }
+            finally { Interlocked.Exchange(ref _sendStarted, 0); }
+            _diagnostics.Sent();
 
             AddCounter(target.DeviceId, upload, raw.Data.Length);
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "A captured packet could not be processed.");
+            _diagnostics.Error();
+            RecordFailure("Device packet processing failed repeatedly");
         }
     }
 
     private void AddCounter(string deviceId, bool upload, int bytes) =>
         _counters.GetOrAdd(deviceId, _ => new TrafficCounter()).Add(upload, bytes);
 
+    internal static bool CanForwardDevicePacket(bool upload, IPAddress sourceIp, IPAddress destinationIp,
+        PhysicalAddress sourceMac, IPAddress deviceIp, PhysicalAddress deviceMac, PhysicalAddress gatewayMac, IReadOnlySet<string> localAddresses)
+    {
+        if (localAddresses.Contains(destinationIp.ToString()) || localAddresses.Contains(sourceIp.ToString())) return false;
+        return upload ? sourceIp.Equals(deviceIp) && sourceMac.Equals(deviceMac)
+            : destinationIp.Equals(deviceIp) && sourceMac.Equals(gatewayMac);
+    }
+
     private void MaintainRedirects()
+    {
+        lock (_targetGate) MaintainRedirectsCore();
+    }
+
+    private void MaintainRedirectsCore()
     {
         try
         {
-            if (_device is null || _network is null || _adapter is null || _localMac is null || _gatewayMac is null) return;
+            if (_suspendRequested || Fault is not null || _device is null || _network is null || _adapter is null || _localMac is null || _gatewayMac is null) return;
             IPAddress gatewayIp = IPAddress.Parse(_network.GatewayIpv4);
             IPAddress localIp = IPAddress.Parse(_adapter.Ipv4Address);
+            Interlocked.Exchange(ref _arpStarted, Environment.TickCount64);
             foreach (TrafficTarget target in _targets.Values)
             {
+                if (_suspendRequested) break;
                 _device.SendPacket(BuildArpReply(target.Mac, _localMac, gatewayIp, target.Mac, target.IpAddress));
                 _device.SendPacket(BuildArpReply(_gatewayMac, _localMac, target.IpAddress, _gatewayMac, gatewayIp));
 
@@ -316,10 +423,30 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
                 _device.SendPacket(BuildArpReply(_localMac, _gatewayMac, gatewayIp, _localMac, localIp));
                 _device.SendPacket(BuildArpReply(_localMac, target.Mac, target.IpAddress, _localMac, localIp));
             }
+            Interlocked.Increment(ref _arpCycles);
+            Interlocked.Exchange(ref _lastArpCycle, Environment.TickCount64);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "The ARP maintenance cycle failed.");
+            Interlocked.Increment(ref _arpErrors);
+            RecordFailure("ARP maintenance failed repeatedly");
+        }
+        finally { Interlocked.Exchange(ref _arpStarted, 0); }
+    }
+
+    private void RecordFailure(string reason)
+    {
+        long now = Environment.TickCount64;
+        lock (_failureGate)
+        {
+            while (_failureTicks.TryPeek(out long tick) && now - tick > 5000) _failureTicks.Dequeue();
+            _failureTicks.Enqueue(now);
+            if (_failureTicks.Count >= 3)
+            {
+                Volatile.Write(ref _fault, reason);
+                while (_failureTicks.Count > 3) _failureTicks.Dequeue();
+            }
         }
     }
 

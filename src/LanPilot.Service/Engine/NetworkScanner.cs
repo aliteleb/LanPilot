@@ -29,7 +29,7 @@ public sealed class NetworkScanner(ILogger<NetworkScanner> logger)
             }
 
             int prefix = NetworkMath.GetPrefixLength(unicast.IPv4Mask);
-            string? gatewayMac = await ResolveMacAsync(gateway.Address, cancellationToken);
+            string? gatewayMac = await ResolveMacAsync(gateway.Address, cancellationToken, unicast.Address);
             result.Add(new NetworkAdapterInfo(
                 nic.Id,
                 nic.Name,
@@ -69,7 +69,7 @@ public sealed class NetworkScanner(ILogger<NetworkScanner> logger)
             await gate.WaitAsync(cancellationToken);
             try
             {
-                string? mac = await ResolveMacAsync(address, cancellationToken);
+                string? mac = await ResolveMacAsync(address, cancellationToken, localAddress);
                 if (mac is null) return;
 
                 bool isLocal = address.Equals(localAddress);
@@ -123,7 +123,8 @@ public sealed class NetworkScanner(ILogger<NetworkScanner> logger)
 
     public async Task<IReadOnlyList<DeviceSnapshot>> ProbeKnownDevicesAsync(
         IReadOnlyDictionary<string, DeviceSnapshot> existing,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IPAddress? localAddress = null)
     {
         DeviceSnapshot[] candidates = existing.Values
             .Where(item => !item.IsGateway && !item.IsLocalComputer)
@@ -134,7 +135,7 @@ public sealed class NetworkScanner(ILogger<NetworkScanner> logger)
         await Task.WhenAll(candidates.Select(async device =>
         {
             if (!IPAddress.TryParse(device.Ipv4Address, out IPAddress? address)) return;
-            string? resolvedMac = await ResolveMacAsync(address, cancellationToken);
+            string? resolvedMac = await ResolveMacAsync(address, cancellationToken, localAddress);
             if (!string.Equals(NormalizeMac(resolvedMac), NormalizeMac(device.MacAddress), StringComparison.OrdinalIgnoreCase)) return;
 
             lock (sync)
@@ -170,14 +171,15 @@ public sealed class NetworkScanner(ILogger<NetworkScanner> logger)
     private static string? NormalizeMac(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : new string(value.Where(Uri.IsHexDigit).ToArray());
 
-    public static async Task<string?> ResolveMacAsync(IPAddress address, CancellationToken cancellationToken)
+    public static async Task<string?> ResolveMacAsync(IPAddress address, CancellationToken cancellationToken, IPAddress? localAddress = null)
     {
         return await Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             byte[] buffer = new byte[6];
             int length = buffer.Length;
-            int result = SendARP(BitConverter.ToUInt32(address.GetAddressBytes()), 0, buffer, ref length);
+            int result = SendARP(BitConverter.ToUInt32(address.GetAddressBytes()),
+                localAddress is null ? 0 : BitConverter.ToUInt32(localAddress.GetAddressBytes()), buffer, ref length);
             return result == 0 && length >= 6
                 ? string.Join(':', buffer.Take(6).Select(value => value.ToString("X2")))
                 : null;

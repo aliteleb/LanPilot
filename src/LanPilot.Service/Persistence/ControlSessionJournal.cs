@@ -13,11 +13,11 @@ public sealed class ControlSessionJournal
 {
     private readonly string _path;
 
-    public ControlSessionJournal()
+    public ControlSessionJournal() : this(Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LanPilot")) { }
+
+    public ControlSessionJournal(string root)
     {
-        string root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "LanPilot");
         Directory.CreateDirectory(root);
         _path = Path.Combine(root, "active-control-session.json");
     }

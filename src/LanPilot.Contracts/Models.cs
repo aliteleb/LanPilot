@@ -151,7 +151,13 @@ public sealed record DashboardSnapshot(
     IReadOnlyList<GroupPolicy> Groups,
     IReadOnlyList<ScheduleRule> Schedules,
     IReadOnlyList<RulePreset> Presets,
-    AppSettings Settings);
+    AppSettings Settings,
+    ControlSafetyStatus? ControlSafety = null,
+    bool? ApplicationMonitoringAvailable = null);
+
+public sealed record ControlSafetyStatus(string Reason, bool RequiresManualResume,
+    bool RestorationComplete, bool ApplicationsActive, DateTimeOffset UpdatedAt,
+    string? FailureReason = null, bool DevicesActive = false);
 
 public sealed record ScanRequest(string? AdapterId);
 public sealed record ControlRequest(bool Enabled);

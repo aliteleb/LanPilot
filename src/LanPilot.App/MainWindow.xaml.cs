@@ -126,8 +126,13 @@ public partial class MainWindow : FluentWindow
 
     private async Task ExitAsync()
     {
+        try
+        {
+            var result = await _client.ExitControlAsync(CancellationToken.None);
+            if (!result.Success) { _viewModel.ReportShutdownFailure(result.Message); return; }
+        }
+        catch (Exception ex) { _viewModel.ReportShutdownFailure(ex.Message); return; }
         _viewModel.StopConnectionRecovery();
-        try { await _client.SetControlAsync(false, CancellationToken.None); } catch { }
         _exitRequested = true;
         _trayIcon.Visible = false;
         _trayIcon.Dispose();

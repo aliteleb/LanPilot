@@ -14,8 +14,14 @@
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
     <PackageReference Include="Microsoft.Extensions.Logging.EventLog" />
-    <PackageReference Include="Divert.Windows" />
+    <ProjectReference Include="..\..\third_party\Divert.Windows\Divert.Windows.csproj" />
     <PackageReference Include="SharpPcap" />
     <PackageReference Include="PacketDotNet" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\third_party\Divert.Windows\**\*"
+             Exclude="..\..\third_party\Divert.Windows\bin\**;..\..\third_party\Divert.Windows\obj\**"
+             Link="third_party\Divert.Windows\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

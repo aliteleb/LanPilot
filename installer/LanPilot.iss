@@ -1,5 +1,13 @@
 #define MyAppName "LanPilot"
-#define MyAppVersion "0.1.1"
+#ifndef MyAppVersion
+#define MyAppVersion "0.1.2"
+#endif
+#ifndef PackageRoot
+#error "Use build.ps1 to supply an isolated PackageRoot"
+#endif
+#ifndef OutputRoot
+#error "Use build.ps1 to supply an isolated OutputRoot"
+#endif
 #define MyAppPublisher "Ali Teleb"
 #define MyAppURL "https://github.com/aliteleb/LanPilot"
 #define MyAppExeName "LanPilot.exe"
@@ -17,9 +25,11 @@ AppCopyright=Copyright (C) 2026 Ali Teleb
 DefaultDirName={autopf}\LanPilot
 DefaultGroupName=LanPilot
 DisableProgramGroupPage=yes
-OutputDir=..\artifacts
+OutputDir={#OutputRoot}
 OutputBaseFilename=LanPilot-Setup-{#MyAppVersion}
-Compression=lzma2/ultra64
+Compression=lzma2/normal
+LZMABlockSize=8192
+LZMANumBlockThreads=1
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
@@ -45,9 +55,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "..\artifacts\package\app\*"; DestDir: "{app}\App"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\artifacts\package\service\*"; DestDir: "{app}\Service"; Excludes: "WinDivert64.sys"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\artifacts\package\service\WinDivert64.sys"; DestDir: "{app}\Service"; Flags: ignoreversion restartreplace uninsrestartdelete
+Source: "{#PackageRoot}\service\*"; DestDir: "{tmp}"; Flags: dontcopy noencryption recursesubdirs createallsubdirs
+Source: "{#PackageRoot}\app\*"; DestDir: "{app}\App"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageRoot}\service\*"; DestDir: "{app}\Service"; Excludes: "WinDivert64.sys"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageRoot}\service\WinDivert64.sys"; DestDir: "{app}\Service"; Flags: ignoreversion restartreplace uninsrestartdelete
 Source: "..\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
@@ -91,15 +102,28 @@ var
   ResultCode: Integer;
 begin
   Result := '';
-  if ServiceExists then
-  begin
-    Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#MyServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Sleep(1200);
-  end;
+  ExtractTemporaryFiles('{tmp}\*');
+  if not Exec(ExpandConstant('{tmp}\LanPilot.Service.exe'), '--prepare-update', ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := 'LanPilot safe shutdown could not start. No files were replaced.'
+  else if ResultCode <> 0 then
+    Result := 'LanPilot could not confirm safe network restoration and service shutdown. Export diagnostics and retry. No files were replaced.';
 end;
 
 function InitializeUninstall: Boolean;
+var
+  ResultCode: Integer;
 begin
+  Result := False;
+  if not Exec(ExpandConstant('{app}\Service\LanPilot.Service.exe'), '--prepare-update', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    MsgBox('Unable to start safe shutdown. Uninstall was cancelled.', mbError, MB_OK);
+    exit;
+  end;
+  if ResultCode <> 0 then
+  begin
+    MsgBox('Network restoration or service shutdown is incomplete. Uninstall was cancelled; export diagnostics and retry.', mbError, MB_OK);
+    exit;
+  end;
   DeleteDataOnUninstall :=
     MsgBox('Delete saved LanPilot devices, rules, usage history, and settings?', mbConfirmation, MB_YESNO) = IDYES;
   Result := True;

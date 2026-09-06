@@ -38,4 +38,19 @@ public sealed class TrafficEngineTests
         Assert.False(TrafficEngine.IsUploadFrame(gateway, gateway));
         Assert.True(TrafficEngine.IsUploadFrame(device, gateway));
     }
+
+    [Theory]
+    [InlineData(true, "192.0.2.20", "198.51.100.1", "102030405060", true)]
+    [InlineData(false, "198.51.100.1", "192.0.2.20", "AABBCCDDEEFF", true)]
+    [InlineData(false, "198.51.100.1", "192.0.2.10", "AABBCCDDEEFF", false)]
+    [InlineData(true, "192.0.2.20", "192.0.2.10", "102030405060", false)]
+    [InlineData(true, "192.0.2.21", "198.51.100.1", "102030405060", false)]
+    [InlineData(true, "192.0.2.20", "198.51.100.1", "112233445566", false)]
+    [InlineData(false, "198.51.100.1", "192.0.2.20", "112233445566", false)]
+    public void ForwardingRequiresMatchingPeerAndNeverReinjectsLocalTraffic(bool upload, string source, string destination, string mac, bool expected)
+    {
+        Assert.Equal(expected, TrafficEngine.CanForwardDevicePacket(upload, IPAddress.Parse(source), IPAddress.Parse(destination),
+            PhysicalAddress.Parse(mac), IPAddress.Parse("192.0.2.20"), PhysicalAddress.Parse("102030405060"),
+            PhysicalAddress.Parse("AABBCCDDEEFF"), new HashSet<string> { "192.0.2.10" }));
+    }
 }

@@ -20,7 +20,7 @@
         <Border Grid.Row="1" Margin="0,0,0,14" Padding="13" Style="{StaticResource PilotSoftCardStyle}">
             <StackPanel Orientation="Horizontal">
                 <ui:SymbolIcon Symbol="Info24" Width="18" Height="18" Margin="0,0,8,0" />
-                <TextBlock Text="LanPilot applies independent download and upload limits per executable. Leave either direction Unlimited when it should not be restricted."
+                <TextBlock Text="{Binding ApplicationControlNotice}"
                            TextWrapping="Wrap" Style="{StaticResource PilotSmallTextStyle}" />
             </StackPanel>
         </Border>

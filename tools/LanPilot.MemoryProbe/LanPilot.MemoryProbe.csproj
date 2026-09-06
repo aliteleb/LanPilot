@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(UseUpstreamDivert)' != 'true'">
+    <ProjectReference Include="..\..\third_party\Divert.Windows\Divert.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseUpstreamDivert)' == 'true'">
+    <PackageReference Include="Divert.Windows" Version="3.0.0" />
+  </ItemGroup>
+</Project>

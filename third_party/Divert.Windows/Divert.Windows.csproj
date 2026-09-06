@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateSupportedOSPlatformAttribute>false</GenerateSupportedOSPlatformAttribute>
+    <AssemblyName>Divert.Windows</AssemblyName>
+    <Version>3.0.0</Version>
+    <AssemblyVersion>3.0.0.0</AssemblyVersion>
+    <FileVersion>3.0.0.2</FileVersion>
+    <InformationalVersion>3.0.0-lanpilot.2</InformationalVersion>
+    <Authors>gdlol and contributors</Authors>
+    <Company />
+    <Product>Divert.Windows</Product>
+    <Copyright>Copyright gdlol and contributors</Copyright>
+    <Description>Divert.Windows with LanPilot's receive-pool lifecycle fix.</Description>
+    <RepositoryUrl>https://github.com/gdlol/Divert.Windows</RepositoryUrl>
+    <PackageLicenseExpression>LGPL-3.0-only</PackageLicenseExpression>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.205" PrivateAssets="all" />
+    <PackageReference Include="Native.WinDivert" Version="2.2.2" />
+    <InternalsVisibleTo Include="LanPilot.Tests" />
+  </ItemGroup>
+</Project>
