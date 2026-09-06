@@ -145,6 +145,16 @@ public sealed class DiagnosticTests : IDisposable
             if (name == "diagnostics.json") Assert.Equal(2, document.RootElement.GetProperty("formatVersion").GetInt32());
             if (name == "windows-policies.json")
             {
+                // Cold Windows/CIM startup on hosted runners can exceed the
+                // collector's intentional deadline. A timed-out optional
+                // collector must still produce a valid, usable archive.
+                if (document.RootElement.TryGetProperty("unavailable", out JsonElement unavailable))
+                {
+                    Assert.True(unavailable.GetBoolean());
+                    Assert.Equal("Timed out after 10 seconds", document.RootElement.GetProperty("reason").GetString());
+                    Assert.False(document.RootElement.TryGetProperty("data", out _));
+                    continue;
+                }
                 // A permission error belongs inside the structured result, not
                 // an unnoticed PowerShell launch/script failure.
                 Assert.True(document.RootElement.TryGetProperty("data", out JsonElement data), document.RootElement.GetRawText());
