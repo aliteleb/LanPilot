@@ -11,6 +11,18 @@ if (args.Contains("--prepare-update", StringComparer.Ordinal))
     return;
 }
 
+ServiceInstanceLease lease;
+try
+{
+    lease = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LanPilot"));
+}
+catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+{
+    Console.Error.WriteLine("LanPilot service ownership could not be acquired. Another instance may be running.");
+    Environment.ExitCode = 1;
+    return;
+}
+using var serviceOwnership = lease;
 HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddWindowsService(options => options.ServiceName = "LanPilot Service");
 builder.Logging.AddEventLog(settings => settings.SourceName = "LanPilot Service");

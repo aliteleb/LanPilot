@@ -11,12 +11,17 @@ public static class ServiceBootstrapper
 
     public static async Task EnsureRunningAsync(CancellationToken cancellationToken)
     {
-        if (Process.GetProcessesByName("LanPilot.Service").Length > 0)
+        Process[] services = Process.GetProcessesByName("LanPilot.Service");
+        bool alreadyRunning = services.Length > 0;
+        foreach (Process service in services) service.Dispose();
+        if (alreadyRunning)
         {
             return;
         }
 
-        string? candidate = new[]
+        using var serviceKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\LanPilotService");
+        bool installedService = serviceKey is not null;
+        string? candidate = installedService ? Path.Combine(Environment.SystemDirectory, "sc.exe") : new[]
         {
             Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Service", "LanPilot.Service.exe")),
             Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "Service", "LanPilot.Service.exe"))
@@ -43,11 +48,12 @@ public static class ServiceBootstrapper
         {
             Process.Start(new ProcessStartInfo(candidate)
             {
+                Arguments = installedService ? "start LanPilotService" : "",
                 WorkingDirectory = Path.GetDirectoryName(candidate)!,
                 UseShellExecute = true,
                 Verb = "runas",
                 WindowStyle = ProcessWindowStyle.Hidden
-            });
+            })?.Dispose();
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {

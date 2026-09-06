@@ -40,6 +40,10 @@ internal static class InstallerMaintenance
                 }
             }
 
+            // A standalone development host must also be stopped before touching
+            // shared recovery state; never clean another live instance's rules.
+            using ServiceInstanceLease ownership = new(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "LanPilot"));
             await using ApplicationDownloadLimiter limiter = new(NullLogger<ApplicationDownloadLimiter>.Instance);
             using ApplicationTrafficMonitor monitor = new(NullLogger<ApplicationTrafficMonitor>.Instance);
             ApplicationTrafficController policies = new(limiter, monitor, NullLogger<ApplicationTrafficController>.Instance);

@@ -13,13 +13,36 @@ public sealed class TrafficEngineTests
         PhysicalAddress source = PhysicalAddress.Parse("AABBCCDDEEFF");
 
         byte[] frame = TrafficEngine.BuildArpReply(
-            target, source, IPAddress.Parse("192.168.1.1"), target, IPAddress.Parse("192.168.1.22"));
+            target, source, IPAddress.Parse("192.168.1.1"), target, IPAddress.Parse("192.168.1.22"), source);
 
         Assert.Equal(42, frame.Length);
         Assert.Equal([0x08, 0x06], frame[12..14]);
         Assert.Equal([0x00, 0x02], frame[20..22]);
         Assert.Equal(source.GetAddressBytes(), frame[22..28]);
         Assert.Equal(IPAddress.Parse("192.168.1.1").GetAddressBytes(), frame[28..32]);
+    }
+
+    [Theory]
+    [InlineData("AABBCCDDEEFF", "192.0.2.1")]
+    [InlineData("102030405060", "192.0.2.22")]
+    public void RecoveryAdvertisesRealNeighborWithoutMovingItsSwitchPort(string neighborMac, string neighborIp)
+    {
+        PhysicalAddress local = PhysicalAddress.Parse("001122334455");
+        PhysicalAddress neighbor = PhysicalAddress.Parse(neighborMac);
+        byte[] frame = TrafficEngine.BuildArpReply(neighbor, neighbor, IPAddress.Parse(neighborIp),
+            neighbor, IPAddress.Parse("192.0.2.10"), local);
+        // A switch learns the Ethernet source, not the sender inside the ARP payload.
+        Assert.Equal(local.GetAddressBytes(), frame[6..12]);
+        Assert.Equal(neighbor.GetAddressBytes(), frame[22..28]);
+        Assert.Equal(IPAddress.Parse(neighborIp).GetAddressBytes(), frame[28..32]);
+    }
+
+    [Fact]
+    public void ArpRejectsIpv6RatherThanWritingMalformedFrames()
+    {
+        PhysicalAddress mac = PhysicalAddress.Parse("001122334455");
+        Assert.Throws<ArgumentException>(() => TrafficEngine.BuildArpReply(mac, mac, IPAddress.IPv6Loopback,
+            mac, IPAddress.Parse("192.0.2.10"), mac));
     }
 
     [Fact]

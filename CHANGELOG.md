@@ -2,6 +2,17 @@
 
 All notable changes to LanPilot are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-09-06 (prerelease)
+
+### Fixed
+
+- Device Start/Pause and row monitoring state no longer mistake application-policy activation for device capture. Devices now show control status, progress, and recovery actions directly; local-PC readings are also marked unmonitored when capture is stopped.
+- Installed UI startup requests the Windows service instead of launching a second standalone host. A machine-wide lifetime lease rejects duplicate service instances before they can access shared rules or recovery state.
+- Removed synthetic local ARP correction frames advertising remote Ethernet sources. Recovery now keeps the transmitting computer's Ethernet source separate from the genuine neighbor address in the ARP payload, preventing those frames from teaching a switch that remote MACs moved to the PC port.
+- Cleanup no longer claims Internet connectivity was verified. This remains unverified without a separate connectivity check.
+
+Validation: 75 automated tests pass and the Release solution builds. Native network recovery on ZXHN H188A has **not** been validated; do not repeat outage tests on the affected user's live network. These changes first ship in the 0.1.3 Setup. See [release notes](docs/releases/v0.1.3.md).
+
 ## [0.1.2] - 2026-09-06 (prerelease)
 
 Real-network, hour-long soak and installer-matrix testing are delegated to the

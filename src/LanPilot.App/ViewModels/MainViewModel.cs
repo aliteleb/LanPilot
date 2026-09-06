@@ -347,9 +347,18 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task ToggleControlAsync()
     {
+        bool startDevices = !IsControlActive;
         await RunOperationAsync(
-            token => _client.SetControlAsync(!IsControlActive, token),
-            IsControlActive ? "Pause control" : "Start control");
+            async token =>
+            {
+                OperationResult result = await _client.SetControlAsync(startDevices, token);
+                DashboardSnapshot snapshot = await _client.GetSnapshotAsync(token);
+                ApplySnapshot(snapshot);
+                if (result.Success && startDevices && !snapshot.IsDeviceControlActive)
+                    return new(false, "Device monitoring did not start. " + snapshot.Status.Message);
+                return result;
+            },
+            startDevices ? "Start control" : "Pause control");
     }
 
     [RelayCommand]
@@ -1096,7 +1105,7 @@ public partial class MainViewModel : ObservableObject
                     ? "Control is suspended. Saved limits and blocking are not being applied. Resume manually after checking diagnostics."
                     : "LanPilot applies independent download and upload limits per executable. Leave either direction Unlimited when it should not be restricted.";
             OnPropertyChanged(nameof(ApplicationControlNotice));
-            IsControlActive = snapshot.Status.Mode == EngineMode.Controlling || snapshot.ControlSafety?.ApplicationsActive == true;
+            IsControlActive = snapshot.IsDeviceControlActive;
             NpcapAvailable = snapshot.Status.NpcapAvailable;
             NpcapVersion = snapshot.Status.NpcapVersion ?? "Not detected";
             Ipv6Detected = snapshot.Status.Ipv6Detected;
@@ -1140,7 +1149,7 @@ public partial class MainViewModel : ObservableObject
                 GroupPolicy? group = ResolveGroup(device.Policy.GroupId);
                 if (!_deviceRows.TryGetValue(device.Id, out DeviceRowViewModel? row))
                 {
-                    row = new DeviceRowViewModel(device, FormatRate, snapshot.Status.Mode == EngineMode.Controlling, group);
+                    row = new DeviceRowViewModel(device, FormatRate, snapshot.IsDeviceControlActive, group);
                     _deviceRows[device.Id] = row;
                     Devices.Add(row);
                     deviceMembershipChanged = true;
@@ -1148,7 +1157,7 @@ public partial class MainViewModel : ObservableObject
                 else
                 {
                     deviceOrderingChanged |= row.IsOnline != device.IsOnline;
-                    row.Apply(device, FormatRate, snapshot.Status.Mode == EngineMode.Controlling, group);
+                    row.Apply(device, FormatRate, snapshot.IsDeviceControlActive, group);
                 }
             }
 
@@ -1503,13 +1512,13 @@ public sealed class DeviceRowViewModel : ObservableObject
     public string UploadedData => IsGateway ? "—" : FormatDataSize(_source.TotalUploadBytes);
     public RateTrend DownloadTrend => _downloadTrend;
     public RateTrend UploadTrend => _uploadTrend;
-    public bool IsTrafficMonitored => IsLocalComputer || (_controlActive && !IsGateway);
+    public bool IsTrafficMonitored => _controlActive && !IsGateway;
     public string DownloadDisplay => IsGateway ? "—" : IsTrafficMonitored ? DownloadRate : "Not monitored";
     public string UploadDisplay => IsGateway ? "—" : IsTrafficMonitored ? UploadRate : "Not monitored";
     public string ActionText => "Edit";
     public string MonitoringText => IsGateway
         ? "Protected gateway"
-        : IsLocalComputer
+        : IsLocalComputer && IsTrafficMonitored
             ? "Local traffic"
             : IsTrafficMonitored
                 ? "Live monitoring"

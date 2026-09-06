@@ -409,19 +409,16 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
         {
             if (_suspendRequested || Fault is not null || _device is null || _network is null || _adapter is null || _localMac is null || _gatewayMac is null) return;
             IPAddress gatewayIp = IPAddress.Parse(_network.GatewayIpv4);
-            IPAddress localIp = IPAddress.Parse(_adapter.Ipv4Address);
             Interlocked.Exchange(ref _arpStarted, Environment.TickCount64);
             foreach (TrafficTarget target in _targets.Values)
             {
                 if (_suspendRequested) break;
-                _device.SendPacket(BuildArpReply(target.Mac, _localMac, gatewayIp, target.Mac, target.IpAddress));
-                _device.SendPacket(BuildArpReply(_gatewayMac, _localMac, target.IpAddress, _gatewayMac, gatewayIp));
+                _device.SendPacket(BuildArpReply(target.Mac, _localMac, gatewayIp, target.Mac, target.IpAddress, _localMac));
+                _device.SendPacket(BuildArpReply(_gatewayMac, _localMac, target.IpAddress, _gatewayMac, gatewayIp, _localMac));
 
-                // Raw ARP injection can also be observed by the local Windows
-                // stack. Reassert the genuine gateway and device mappings so
-                // LanPilot never poisons its own host while redirecting peers.
-                _device.SendPacket(BuildArpReply(_localMac, _gatewayMac, gatewayIp, _localMac, localIp));
-                _device.SendPacket(BuildArpReply(_localMac, target.Mac, target.IpAddress, _localMac, localIp));
+                // Never impersonate a peer in the Ethernet source header: a
+                // switch could learn its MAC on our port. Do not inject fake
+                // inbound replies to repair the local Windows neighbor cache.
             }
             Interlocked.Increment(ref _arpCycles);
             Interlocked.Exchange(ref _lastArpCycle, Environment.TickCount64);
@@ -460,10 +457,10 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
 
     private void RestoreTarget(TrafficTarget target)
     {
-        if (_device is null || _network is null || _gatewayMac is null) return;
+        if (_device is null || _network is null || _gatewayMac is null || _localMac is null) return;
         IPAddress gatewayIp = IPAddress.Parse(_network.GatewayIpv4);
-        _device.SendPacket(BuildArpReply(target.Mac, _gatewayMac, gatewayIp, target.Mac, target.IpAddress));
-        _device.SendPacket(BuildArpReply(_gatewayMac, target.Mac, target.IpAddress, _gatewayMac, gatewayIp));
+        _device.SendPacket(BuildArpReply(target.Mac, _gatewayMac, gatewayIp, target.Mac, target.IpAddress, _localMac));
+        _device.SendPacket(BuildArpReply(_gatewayMac, target.Mac, target.IpAddress, _gatewayMac, gatewayIp, _localMac));
     }
 
     public static byte[] BuildArpReply(
@@ -471,11 +468,18 @@ public sealed class TrafficEngine(ILogger<TrafficEngine> logger) : IAsyncDisposa
         PhysicalAddress sourceMac,
         IPAddress senderIp,
         PhysicalAddress targetMac,
-        IPAddress targetIp)
+        IPAddress targetIp,
+        PhysicalAddress ethernetSourceMac)
     {
+        if (senderIp.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+            targetIp.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+            new[] { destinationMac, sourceMac, targetMac, ethernetSourceMac }.Any(mac => mac.GetAddressBytes().Length != 6))
+            throw new ArgumentException("ARP requires IPv4 addresses and six-byte MAC addresses.");
         byte[] frame = new byte[42];
         destinationMac.GetAddressBytes().CopyTo(frame, 0);
-        sourceMac.GetAddressBytes().CopyTo(frame, 6);
+        // ARP advertises the genuine neighbor; Ethernet identifies the actual
+        // transmitter so restoration cannot move remote MACs onto our port.
+        ethernetSourceMac.GetAddressBytes().CopyTo(frame, 6);
         frame[12] = 0x08;
         frame[13] = 0x06;
         frame[14] = 0x00;

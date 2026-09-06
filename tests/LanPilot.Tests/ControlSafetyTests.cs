@@ -34,6 +34,15 @@ public sealed class ControlSafetyTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CleanupDoesNotClaimInternetConnectivityWasVerified()
+    {
+        var result = await _coordinator.SuspendAllAsync("UserPause", CancellationToken.None);
+        Assert.True(result.Success);
+        Assert.Contains("connectivity has not been verified", result.Message);
+        Assert.DoesNotContain("Internet access restored", result.Message);
+    }
+
+    [Fact]
     public async Task FaultSuspendsAllScopesButPreservesSavedPolicies()
     {
         Assert.True((await _coordinator.SaveApplicationPolicyAsync(Policy(true), CancellationToken.None)).Success);

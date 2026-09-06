@@ -398,10 +398,10 @@ public sealed class LanPilotCoordinator(
         try { await _safetyJournal.SaveAsync(_safety, CancellationToken.None); }
         catch (Exception ex) { errors.Add(ex); _safety = _safety with { RestorationComplete = false }; }
         foreach (Exception error in errors) logger.LogError(error, "Control restoration step failed.");
-        string message = errors.Count == 0 ? "All LanPilot control is suspended. Internet access restored."
+        string message = errors.Count == 0 ? "All LanPilot control is suspended. Cleanup completed; Internet connectivity has not been verified."
             : "Restoration incomplete. Some LanPilot controls may remain active; export diagnostics and retry Emergency pause.";
         SetStatus(errors.Count == 0 ? EngineMode.Idle : EngineMode.Faulted, message);
-        diagnostics.Record("LanPilot.Control", errors.Count == 0 ? "Information" : "Error", $"Suspended: {reason}; restored={errors.Count == 0}");
+        diagnostics.Record("LanPilot.Control", errors.Count == 0 ? "Information" : "Error", $"Suspended: {reason}; cleanupCompleted={errors.Count == 0}; connectivityVerified=False");
         if (reason == "Fault" || errors.Count != 0)
             NotificationRaised?.Invoke(this, new NotificationEvent("Control suspended", message, NotificationSeverity.Warning));
         RaiseSnapshotChanged();

@@ -9,6 +9,7 @@
     <Grid Style="{StaticResource PilotPageRootStyle}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -32,7 +33,22 @@
             </Grid>
         </Grid>
 
-        <Border Grid.Row="1" Style="{StaticResource PilotFlatPanelStyle}">
+        <Border Grid.Row="1" Margin="0,0,0,14" Padding="12" Style="{StaticResource PilotSoftCardStyle}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
+                    <ui:ProgressRing Width="18" Height="18" Margin="0,0,8,0" IsIndeterminate="True"
+                                     Visibility="{Binding ToggleControlCommand.IsRunning, Converter={StaticResource BooleanVisibilityConverter}}" />
+                    <ui:Button Content="{Binding ControlButtonText}" Command="{Binding ToggleControlCommand}"
+                               IsEnabled="{Binding IsConnected}" Margin="0,0,8,0" />
+                    <ui:Button Content="Emergency pause" Command="{Binding EmergencyPauseCommand}"
+                               IsEnabled="{Binding IsConnected}" Appearance="Danger" />
+                </StackPanel>
+                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" VerticalAlignment="Center"
+                           Style="{StaticResource PilotSmallTextStyle}" />
+            </DockPanel>
+        </Border>
+
+        <Border Grid.Row="2" Style="{StaticResource PilotFlatPanelStyle}">
             <Grid>
             <DataGrid x:Name="DeviceGrid" SelectedItem="{Binding SelectedDevice}"
                       MouseDoubleClick="DeviceGrid_MouseDoubleClick" AutoGenerateColumns="False" IsReadOnly="True"
@@ -228,7 +244,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.RowSpan="2" Panel.ZIndex="100" Margin="-18,-10,-18,-18" Background="#B8000000"
+        <Grid Grid.RowSpan="3" Panel.ZIndex="100" Margin="-18,-10,-18,-18" Background="#B8000000"
               Visibility="{Binding IsDeviceEditorVisible, Converter={StaticResource BooleanVisibilityConverter}}">
             <Border Width="570" MaxHeight="660" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center"
                     Style="{StaticResource PilotDialogCardStyle}">

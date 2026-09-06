@@ -1,6 +1,6 @@
 #define MyAppName "LanPilot"
 #ifndef MyAppVersion
-#define MyAppVersion "0.1.2"
+#define MyAppVersion "0.1.3"
 #endif
 #ifndef PackageRoot
 #error "Use build.ps1 to supply an isolated PackageRoot"

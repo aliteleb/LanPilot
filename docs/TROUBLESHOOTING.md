@@ -1,5 +1,19 @@
 # Troubleshooting
 
+## 0.1.2 device-control outage investigation (2026-09-06)
+
+Do not repeat Start control on an affected live network. Keep control suspended
+and preserve diagnostics. Version 0.1.3 corrections separate application activation
+from device monitoring, prevent duplicate hosts, and remove ARP frames that use
+remote Ethernet source addresses. They are not in the published 0.1.2 installer.
+See [0.1.3 release notes](releases/v0.1.3.md) for validation status.
+
+`Service connected` only confirms IPC. `Not monitored` means device capture is
+not active, not that the device has no traffic. A cleanup-success message (or the
+legacy `RestorationComplete` field) does not verify Internet connectivity or that
+the router/peers accepted ARP recovery. Do not disable router security or IPv6
+solely because capture counters are zero.
+
 For crashes, exact stack traces, Debug builds, and optional native memory dumps, see [Crash diagnostics](DIAGNOSTICS.md).
 
 ## Service offline

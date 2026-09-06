@@ -153,7 +153,14 @@ public sealed record DashboardSnapshot(
     IReadOnlyList<RulePreset> Presets,
     AppSettings Settings,
     ControlSafetyStatus? ControlSafety = null,
-    bool? ApplicationMonitoringAvailable = null);
+    bool? ApplicationMonitoringAvailable = null)
+{
+    // Application policies can be active while device capture is stopped.
+    // This is also the legacy fallback for services without the optional state.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsDeviceControlActive => Status.Mode == EngineMode.Controlling &&
+        (ControlSafety is null || (ControlSafety.DevicesActive && ControlSafety.Reason == "None"));
+}
 
 public sealed record ControlSafetyStatus(string Reason, bool RequiresManualResume,
     bool RestorationComplete, bool ApplicationsActive, DateTimeOffset UpdatedAt,
